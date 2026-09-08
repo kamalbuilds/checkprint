@@ -1,6 +1,7 @@
 # DELIVERABLE
 
-**Delivery QC that repairs the master and re-measures to prove it.**
+**Measures the full delivery spec. Repairs loudness to target. Proves the delta by
+re-measuring.**
 
 Agentic Cinema hackathon · ClickHouse track · Gemini on Google Cloud
 
@@ -22,7 +23,34 @@ A **post-production supervisor or delivery QC operator** at an indie distributor
 house, or film archive. They ship masters to platforms that reject on spec. Today they
 either pay for Telestream Vantage / Venera Pulsar / Baton, or they eyeball it.
 
-**Those tools detect and report. This one repairs and re-proves.**
+The thresholds this tool enforces are not invented for a demo. They are published
+standards, quoted here from the primary sources so any of them can be checked:
+
+- **EBU R128** ([tech.ebu.ch/docs/r/r128.pdf](https://tech.ebu.ch/docs/r/r128.pdf)),
+  clause h: *"the Programme Loudness Level shall be normalised to a Target Level of
+  −23.0 LUFS ... a tolerance of ±1.0 LU is permitted."* Those two numbers are
+  `EBU_R128_TARGET_LUFS` and `EBU_R128_TOLERANCE_LU` in `qc/measure.py`.
+- **ATSC A/85 / the CALM Act** (47 U.S.C. §621), the US rule that makes commercial
+  loudness a legal matter rather than a preference: −24 LKFS, ±2 LU.
+- **Netflix Timed Text Style Guide**: 17 characters/second adult reading speed, 5/6 s
+  minimum cue duration, 42 characters per line, 2 lines maximum.
+
+Those tools **detect and report**. This one **repairs what is deterministically
+repairable, then re-measures to prove the repair landed** and escalates the rest with the
+specific reason. The honest scope, stated up front rather than buried:
+
+| Defect | What this tool does |
+|---|---|
+| Integrated loudness (EBU R128 / ATSC A/85) | **Measures and repairs**, verified by re-measurement |
+| True peak | **Measures and repairs** |
+| Subtitle reading speed / min duration | Measures, and **partially** repairs by retiming into free space |
+| Subtitle line length | **Measures only.** Rewriting text is a human judgement |
+| Black frames / frozen frames | **Measures only.** A reel change and damage look identical to a machine |
+
+**Nobody has used this in production yet.** It was built during the hackathon and
+validated against public files anyone can download, plus a synthesised modern master
+(see below). That is the honest state, and every number here is reproducible rather
+than reported.
 
 ## Verify every claim yourself
 
@@ -47,6 +75,28 @@ Loudness is a property of a specific encode over a specific window, so both are 
 stated. The same title's higher-bitrate encode measures −26.9 LUFS over its first 240 s.
 Two encodes of one film genuinely differ; the tool reports what it measured, not what the
 title "is".
+
+### It is not only old films
+
+The demo titles are public-domain features because those are the films anyone can
+download and re-measure. The obvious objection is that a 1950s optical soundtrack is
+nothing like a modern delivery master, so `tests/test_modern_master.py` builds one and
+runs the same loop against it:
+
+| Property | Value |
+|---|---|
+| Resolution | 1920×1080 |
+| Audio | **5.1 surround, 48 kHz**, 448 kbps |
+| Measured | **−27.3 LUFS** → FAIL |
+| After repair | **−22.2 LUFS** → PASS |
+| Channel layout after repair | still 6 channels |
+
+That last row is a test in its own right: a repair that silently downmixed 5.1 to stereo
+would ruin a master while appearing to fix the loudness. It was verified by forcing a
+downmix and confirming the test goes red.
+
+An in-spec modern master measures −23.0 and PASSES, so the gate is not simply flagging
+everything modern either.
 
 Subtitle measurements on real archive.org tracks:
 
@@ -140,6 +190,10 @@ the verdict flips, so a gate that cannot fail is caught here rather than in fron
 - **ASR subtitles are noisy.** archive.org tracks are machine-transcribed, so some cues are
   near-zero duration. Those are reported as minimum-duration failures rather than absurd
   reading-speed numbers.
+- **No production user yet.** This was built during a hackathon. It has not been run
+  inside a post house on a paying delivery, and nobody is quoted here saying it saved
+  them a redeliver, because that has not happened yet. What it has is reproducible
+  numbers on files anyone can fetch.
 - **Loudness remediation is two-pass.** Single-pass `loudnorm` runs in dynamic mode and
   measurably moved a −24.3 LUFS file to −25.3, i.e. further from spec. The `verify` step
   caught it. Fixed, and there is a regression test that fails when the fix is disabled.
