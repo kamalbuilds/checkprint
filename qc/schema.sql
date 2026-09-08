@@ -77,3 +77,17 @@ SELECT
 FROM deliverable.loudness_samples
 WHERE short_term > -70
 GROUP BY title_id, stage;
+
+-- Pipeline run state. Lives in ClickHouse rather than process memory because
+-- Cloud Run serves requests from multiple instances: a job started on instance A
+-- was invisible to the poll that landed on instance B, which returned 404.
+CREATE TABLE IF NOT EXISTS deliverable.jobs
+(
+    job         String,
+    updated_at  DateTime DEFAULT now(),
+    state       LowCardinality(String),
+    identifier  String,
+    payload     String
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY job;

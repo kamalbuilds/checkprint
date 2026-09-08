@@ -26,6 +26,43 @@ WEB = Path(__file__).parent
 _runs: dict[str, dict] = {}
 _lock = threading.Lock()
 
+
+def _save_job(job: str, payload: dict) -> None:
+    """Persist job state to ClickHouse.
+
+    Cloud Run serves requests from several instances, so a job held only in this
+    process's memory is invisible to a poll that lands elsewhere: that returned 404
+    while the run was actually progressing. Memory stays as a fast path.
+    """
+    with _lock:
+        _runs[job] = payload
+    try:
+        store.client().insert(
+            "deliverable.jobs",
+            [[job, payload.get("state", "running"), payload.get("identifier", ""),
+              json.dumps(payload)]],
+            column_names=["job", "state", "identifier", "payload"],
+        )
+    except Exception:
+        pass  # memory still serves this instance; never fail the request on telemetry
+
+
+def _load_job(job: str) -> dict | None:
+    with _lock:
+        if job in _runs:
+            return _runs[job]
+    try:
+        res = store.client().query(
+            "SELECT payload FROM deliverable.jobs WHERE job = %(j)s "
+            "ORDER BY updated_at DESC LIMIT 1",
+            parameters={"j": job},
+        )
+        if res.result_rows:
+            return json.loads(res.result_rows[0][0])
+    except Exception:
+        return None
+    return None
+
 # --- ClickHouse readiness flag (background boot in Cloud Run) ----------------
 
 _ch_ready = threading.Event()
@@ -115,17 +152,14 @@ def start_run(identifier: str, seconds: int = 180, max_bytes: int = 16_000_000):
         raise HTTPException(503, "ClickHouse is still starting up, try again shortly")
 
     job = str(uuid.uuid4())[:8]
-    with _lock:
-        _runs[job] = {"state": "running", "identifier": identifier, "steps": []}
+    _save_job(job, {"state": "running", "identifier": identifier, "steps": []})
 
     def _work():
         try:
             run = run_pipeline(identifier, WORK / job, seconds=seconds, max_bytes=max_bytes)
-            with _lock:
-                _runs[job] = {"state": "done", "identifier": identifier, **run.as_dict()}
+            _save_job(job, {"state": "done", "identifier": identifier, **run.as_dict()})
         except Exception as exc:  # surfaced to the UI, never swallowed
-            with _lock:
-                _runs[job] = {"state": "failed", "identifier": identifier, "error": str(exc)[:400]}
+            _save_job(job, {"state": "failed", "identifier": identifier, "error": str(exc)[:400]})
 
     threading.Thread(target=_work, daemon=True).start()
     return {"job": job}
@@ -133,10 +167,10 @@ def start_run(identifier: str, seconds: int = 180, max_bytes: int = 16_000_000):
 
 @app.get("/api/run/{job}")
 def get_run(job: str):
-    with _lock:
-        if job not in _runs:
-            raise HTTPException(404, "no such job")
-        return _runs[job]
+    payload = _load_job(job)
+    if payload is None:
+        raise HTTPException(404, "no such job")
+    return payload
 
 
 @app.get("/api/audio/{job}/{stage}")
