@@ -108,29 +108,30 @@ Return strict JSON:
 """
 
 
+class GeminiRequired(RuntimeError):
+    """Raised when the classify step has no model. The pipeline does not degrade.
+
+    There is deliberately no deterministic fallback here. A fallback that produces
+    the same plan shape makes the model decorative: you could delete Gemini and the
+    product would behave identically. The repair PLAN is a judgement call (which
+    failures are worth fixing, in what order, and which need a human), so it is the
+    model's job. Execution stays deterministic in ffmpeg.
+    """
+
+
 def classify(report: m.QCReport) -> dict:
-    """Gemini decides the repair plan. Falls back to a deterministic plan offline."""
+    """Gemini decides the repair plan. Required: no model means no run."""
     failures = [f.as_dict() for f in report.failures]
     if not failures:
         return {"repairs": [], "blocking": [], "operator_note": "All checks pass. Ready to deliver."}
 
     client = _gemini()
     if client is None:
-        # Offline fallback so the pipeline is testable without credentials.
-        # Deliberately conservative and clearly labelled, never presented as model output.
-        return {
-            "repairs": [
-                {"check": f["check"],
-                 "action": ("loudness_normalise" if "loudness" in f["check"] or "peak" in f["check"]
-                            else "retime_cues" if "subtitle" in f["check"]
-                            else "manual_review"),
-                 "rationale": "deterministic fallback plan (no model credentials configured)"}
-                for f in failures if f["auto_fixable"]
-            ],
-            "blocking": [f["check"] for f in failures if not f["auto_fixable"]],
-            "operator_note": "Model unavailable; deterministic repair plan applied.",
-            "model": None,
-        }
+        raise GeminiRequired(
+            "Gemini credentials are required to plan repairs. Set GOOGLE_API_KEY, or "
+            "GOOGLE_GENAI_USE_VERTEXAI=true with GOOGLE_CLOUD_PROJECT. The repair plan "
+            "is a model decision by design and has no offline substitute."
+        )
 
     resp = client.models.generate_content(
         model=MODEL,
@@ -139,6 +140,16 @@ def classify(report: m.QCReport) -> dict:
     )
     plan = json.loads(resp.text)
     plan["model"] = MODEL
+
+    # The model chooses the plan, but it may not invent actions the executor cannot
+    # perform, and it may never mark a non-auto-fixable defect as auto-repairable.
+    allowed = {"loudness_normalise", "retime_cues", "manual_review"}
+    fixable = {f["check"] for f in failures if f["auto_fixable"]}
+    plan["repairs"] = [
+        r for r in plan.get("repairs", [])
+        if r.get("action") in allowed
+        and (r.get("action") == "manual_review" or r.get("check") in fixable)
+    ]
     return plan
 
 

@@ -34,6 +34,7 @@ _ch_error: str | None = None
 
 def _wait_for_clickhouse():
     """Background thread: poll local ClickHouse until it responds, then set flag."""
+    global _ch_error
     import os
     import time
 
@@ -43,7 +44,6 @@ def _wait_for_clickhouse():
             store.client().query("SELECT 1")
             _ch_ready.set()
         except Exception as exc:
-            global _ch_error
             _ch_error = str(exc)[:200]
         return
 
@@ -54,7 +54,6 @@ def _wait_for_clickhouse():
             return
         except Exception:
             time.sleep(1)
-    global _ch_error
     _ch_error = "ClickHouse did not become reachable within 120s"
 
 

@@ -1,4 +1,5 @@
 clickhouse-connect>=0.9
+mcp-clickhouse>=0.6
 google-genai>=1.0
 fastapi>=0.115
 uvicorn[standard]>=0.32
