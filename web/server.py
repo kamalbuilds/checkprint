@@ -33,28 +33,34 @@ _ch_error: str | None = None
 
 
 def _wait_for_clickhouse():
-    """Background thread: poll local ClickHouse until it responds, then set flag."""
+    """Background thread: poll ClickHouse until it responds, then set the ready flag.
+
+    Retries for both local and external hosts. ClickHouse Cloud idles services to
+    sleep, so the first connection after a cold start legitimately fails with an
+    HTTP driver exception and succeeds a few seconds later once the service wakes.
+    A single attempt made the deployed service report "warming" forever.
+    """
     global _ch_error
     import os
     import time
 
-    if os.getenv("CLICKHOUSE_HOST", "localhost") != "localhost":
-        # External CH (ClickHouse Cloud) -- should already be reachable
-        try:
-            store.client().query("SELECT 1")
-            _ch_ready.set()
-        except Exception as exc:
-            _ch_error = str(exc)[:200]
-        return
+    external = os.getenv("CLICKHOUSE_HOST", "localhost") != "localhost"
+    attempts = 60 if external else 120
+    last: str | None = None
 
-    for _ in range(120):
+    for i in range(attempts):
         try:
             store.client().query("SELECT 1")
             _ch_ready.set()
+            _ch_error = None
             return
-        except Exception:
-            time.sleep(1)
-    _ch_error = "ClickHouse did not become reachable within 120s"
+        except Exception as exc:
+            last = str(exc)[:200]
+            # Cloud wake-up takes a few seconds; back off a little for external hosts.
+            time.sleep(2 if external else 1)
+            _ch_error = f"connecting (attempt {i + 1}/{attempts}): {last}"
+
+    _ch_error = f"ClickHouse did not become reachable: {last}"
 
 
 # Start the readiness poller as soon as the module loads
