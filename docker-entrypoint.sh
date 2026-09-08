@@ -9,15 +9,17 @@ if [ "${CLICKHOUSE_HOST:-localhost}" = "localhost" ]; then
   # Cloud Run filesystem is read-only except /tmp
   mkdir -p /tmp/clickhouse/{data,tmp,user_files,format_schemas,log}
 
-  # Start ClickHouse with /tmp-based config, fully backgrounded
-  clickhouse server --config-file=/app/clickhouse-local.xml &
+  # Start ClickHouse with /tmp-based config, fully backgrounded.
+  # APT-installed binary is at /usr/bin/clickhouse-server.
+  clickhouse-server --config-file=/app/clickhouse-local.xml --daemon 2>&1 || \
+    clickhouse-server --config-file=/app/clickhouse-local.xml &
 
   # Apply schema in a background subshell so uvicorn starts immediately
   (
     for i in $(seq 1 90); do
-      if clickhouse client --port 9000 -q "SELECT 1" >/dev/null 2>&1; then
+      if clickhouse-client --port 9000 -q "SELECT 1" >/dev/null 2>&1; then
         echo "[entrypoint] ClickHouse ready after ${i}s"
-        clickhouse client --port 9000 --multiquery < /app/qc/schema.sql
+        clickhouse-client --port 9000 --multiquery < /app/qc/schema.sql
         echo "[entrypoint] schema applied"
         exit 0
       fi

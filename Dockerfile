@@ -1,15 +1,18 @@
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ffmpeg curl ca-certificates
+      ffmpeg curl ca-certificates gnupg
 
-# ClickHouse runs inside the container so the deployed service is self-contained.
-# The track permits ClickHouse Cloud or self-hosted; this is self-hosted.
-# Set CLICKHOUSE_HOST/PASSWORD to a Cloud endpoint to use Cloud instead: no code change,
-# the entrypoint skips the local server whenever CLICKHOUSE_HOST is not localhost.
-RUN curl -sSL -o /usr/local/bin/clickhouse \
-      "https://builds.clickhouse.com/master/amd64/clickhouse" \
- && chmod +x /usr/local/bin/clickhouse
+# Install ClickHouse from the official APT repo (pre-extracted, no cold-start
+# decompression penalty like the self-extracting static binary).
+RUN curl -fsSL 'https://packages.clickhouse.com/rpm/lts/repodata/repomd.xml.key' | \
+      gpg --dearmor -o /usr/share/keyrings/clickhouse-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/clickhouse-keyring.gpg] https://packages.clickhouse.com/deb stable main" \
+      > /etc/apt/sources.list.d/clickhouse.list && \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      clickhouse-server clickhouse-client && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt .
