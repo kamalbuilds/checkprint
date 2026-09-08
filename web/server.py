@@ -219,11 +219,19 @@ def loudness_profile(title_id: str):
         # What that query actually cost, from ClickHouse's own query_log. Reported
         # rather than asserted: a percentile over a 100ms sample stream should be
         # cheap, and this is the number that shows whether it is.
+        #
+        # The filter must exclude DDL. Matching '%worst_windows%' alone also matches
+        # the CREATE OR REPLACE VIEW issued at startup, which reads 0 rows, so the
+        # panel proudly reported "0 rows read" for a query that had scanned 9,316.
+        # Match a column only the SELECT projects, and require a non-zero read.
         try:
             cost = ch.query(
                 """SELECT query_duration_ms, read_rows, formatReadableSize(read_bytes)
                    FROM system.query_log
-                   WHERE type = 'QueryFinish' AND query LIKE '%worst_windows%'
+                   WHERE type = 'QueryFinish'
+                     AND query LIKE '%FROM deliverable.worst_windows%'
+                     AND query NOT LIKE 'CREATE%'
+                     AND read_rows > 0
                      AND event_time > now() - INTERVAL 10 MINUTE
                    ORDER BY event_time DESC LIMIT 1"""
             ).result_rows
