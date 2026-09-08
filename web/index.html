@@ -3,385 +3,615 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DELIVERABLE: broadcast delivery QC that repairs the master</title>
+<title>DELIVERABLE: broadcast delivery QC</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  /* Tokens from DESIGN.md (ClickHouse design system), used verbatim.
-     Chosen deliberately: this is the ClickHouse track, and the two judges on it
-     are ClickHouse engineers. Speaking their own visual language is a stronger
-     signal than a fourth generic dark dashboard. Tokens live here in one block,
-     never inline on elements. */
-  :root{
-    --primary:#faff69; --primary-active:#e6eb52; --primary-disabled:#3a3a1f;
-    --ink:#ffffff; --body:#cccccc; --body-strong:#e6e6e6;
-    --muted:#888888; --muted-soft:#5a5a5a;
-    --hairline:#2a2a2a; --hairline-strong:#3a3a3a;
-    --canvas:#0a0a0a; --surface-soft:#121212; --surface-card:#1a1a1a;
-    --surface-elevated:#242424; --on-primary:#0a0a0a;
-    --success:#22c55e; --warning:#f59e0b; --error:#ef4444;
+:root{
+  --ink:#ffffff;
+  --text-secondary:#767d88;
+  --text-muted:#7d848e;
+  --text-dim:#a7a7a7;
+  --canvas:#000000;
+  --surface:#030303;
+  --surface-card:#1a1a1a;
+  --border:#27272a;
+  --success:#22c55e;
+  --error:#ef4444;
+  --warn:#f59e0b;
+  --target:#ffffff;
+  --band:rgba(255,255,255,0.06);
+  --sans:'DM Sans',system-ui,-apple-system,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--canvas);color:var(--ink);
+     font:400 16px/1.3 var(--sans);-webkit-font-smoothing:antialiased;
+     letter-spacing:-0.16px;overflow-x:hidden}
 
-    --r-sm:6px; --r-md:8px; --r-lg:12px; --r-pill:9999px;
-    --s-xs:8px; --s-sm:12px; --s-md:16px; --s-lg:24px; --s-xl:32px; --s-xxl:48px;
+/* ── first viewport: full-bleed split ── */
+.hero{display:grid;grid-template-columns:62fr 38fr;height:100vh;min-height:600px}
+@media(max-width:900px){.hero{grid-template-columns:1fr;height:auto;min-height:0}
+  .hero-still{height:50vh;min-height:320px}.hero-right{min-height:420px}}
 
-    --sans:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;
-    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,monospace;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--canvas);color:var(--body);
-       font:400 16px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+/* LEFT: the still */
+.hero-still{position:relative;overflow:hidden;background:var(--surface)}
+.hero-still img{width:100%;height:100%;object-fit:cover;display:block;opacity:0;
+                transition:opacity .6s ease}
+.hero-still img.loaded{opacity:1}
+.hero-still::after{content:'';position:absolute;inset:0;
+  background:linear-gradient(0deg,rgba(0,0,0,.7) 0%,transparent 40%,transparent 80%,rgba(0,0,0,.3) 100%);
+  pointer-events:none}
+.still-meta{position:absolute;bottom:24px;left:24px;z-index:1}
+.still-title{font-size:20px;font-weight:400;line-height:1.0;letter-spacing:-0.9px;
+             color:var(--ink);max-width:420px}
+.still-id{font:400 11px/1.3 var(--mono);color:var(--text-dim);margin-top:6px;
+           letter-spacing:0}
 
-  /* Header. Wordmark in Inter 700 with the system's negative tracking, not
-     letterspaced caps: ClickHouse sets display type tight, not wide. */
-  header{border-bottom:1px solid var(--hairline);padding:var(--s-lg) var(--s-xl);
-         display:flex;align-items:baseline;gap:var(--s-md);flex-wrap:wrap}
-  .wordmark{margin:0;font-size:24px;font-weight:700;line-height:1.3;
-            letter-spacing:-0.3px;color:var(--ink)}
-  .wordmark b{color:var(--primary);font-weight:700}
-  .sub{color:var(--muted);font-size:14px;max-width:62ch}
+/* RIGHT: loudness meter bay */
+.hero-right{padding:32px 28px;display:flex;flex-direction:column;
+            justify-content:center;gap:24px;background:var(--surface);
+            border-left:1px solid var(--border)}
 
-  main{max-width:1200px;margin:0 auto;padding:var(--s-xl)}
-  .row{display:grid;grid-template-columns:320px 1fr;gap:var(--s-lg);align-items:start}
-  @media(max-width:900px){.row{grid-template-columns:1fr}}
+/* loudness meter */
+.meter-wrap{display:flex;gap:20px;align-items:stretch;flex:1;min-height:0;max-height:380px}
+.meter{position:relative;width:72px;flex:none;background:var(--surface-card);
+       border:1px solid var(--border);border-radius:4px;overflow:hidden}
+.meter-scale{position:absolute;inset:0;display:flex;flex-direction:column}
+.meter-target{position:absolute;left:0;right:0;height:1px;background:var(--ink);z-index:2}
+.meter-band{position:absolute;left:0;right:0;background:var(--band);z-index:1}
+.meter-label{position:absolute;right:calc(100% + 6px);font:400 10px/1 var(--mono);
+             color:var(--text-dim);white-space:nowrap;transform:translateY(-50%)}
+.meter-bar{position:absolute;bottom:0;width:50%;transition:height .5s ease;border-radius:2px 2px 0 0}
+.meter-bar.bar-before{left:4px;background:rgba(255,255,255,0.15)}
+.meter-bar.bar-after{right:4px;background:var(--ink)}
+.meter-ticks{position:absolute;right:calc(100% + 2px);top:0;bottom:0}
 
-  /* Cards: surface-card on canvas, 12px radius, 24-32px padding per the system. */
-  .panel{background:var(--surface-card);border:1px solid var(--hairline);
-         border-radius:var(--r-lg);padding:var(--s-lg)}
-  .panel + .panel{margin-top:var(--s-lg)}
-  h2{font-size:12px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;
-     color:var(--muted);margin:0 0 var(--s-md)}
+/* LUFS readout */
+.lufs-readout{flex:1;display:flex;flex-direction:column;justify-content:center;gap:8px;
+              min-width:0}
+.lufs-number{font:400 56px/1.0 var(--sans);letter-spacing:-2px;
+             transition:color .3s ease}
+.lufs-pair{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.lufs-arrow{color:var(--text-dim);font-size:20px}
+.lufs-unit{font:450 11px/1 var(--sans);text-transform:uppercase;letter-spacing:0.35px;
+           color:var(--text-secondary);margin-top:2px}
+.lufs-spec{font:400 13px/1.3 var(--mono);color:var(--text-dim);margin-top:4px}
+.lufs-empty{font:400 14px/1.4 var(--sans);color:var(--text-muted);max-width:240px}
 
-  /* Primary CTA: yellow on black, the system's single voltage. */
-  button{background:var(--primary);color:var(--on-primary);border:0;
-         border-radius:var(--r-md);padding:12px 20px;height:40px;
-         font:600 14px/1 var(--sans);cursor:pointer;transition:background .15s ease}
-  button:hover:not(:disabled){background:var(--primary-active)}
-  button:disabled{background:var(--primary-disabled);color:var(--muted);cursor:default}
-  button.secondary{background:var(--surface-elevated);color:var(--ink)}
-  button.secondary:hover:not(:disabled){background:var(--hairline-strong)}
+/* transport + primary action */
+.controls{display:flex;flex-direction:column;gap:8px}
+.btn{border:0;border-radius:4px;padding:10px 16px;font:500 14px/1 var(--sans);
+     cursor:pointer;transition:background .15s ease,opacity .15s ease;letter-spacing:-0.16px}
+.btn:disabled{opacity:.3;cursor:default}
+.btn-primary{background:var(--ink);color:var(--canvas)}
+.btn-primary:hover:not(:disabled){background:#e0e0e0}
+.btn-transport{background:var(--surface-card);color:var(--text-secondary);
+               border:1px solid var(--border);font-size:13px;padding:8px 14px}
+.btn-transport:hover:not(:disabled){color:var(--ink);border-color:var(--text-dim)}
 
-  .title-item{padding:10px 12px;border:1px solid var(--hairline);
-              border-radius:var(--r-sm);margin-bottom:var(--s-xs);cursor:pointer;
-              font-size:14px;color:var(--body);
-              transition:border-color .15s ease,background .15s ease,transform .15s ease}
-  .title-item:hover{border-color:var(--hairline-strong);background:var(--surface-elevated);
-                    transform:translateY(-1px)}
-  .title-item.sel{border-color:var(--hairline-strong);color:var(--ink);
-                  background:var(--surface-elevated);
-                  box-shadow:inset 3px 0 0 var(--primary)}
+/* pipeline log (appears during run) */
+.pipeline-log{font:400 12px/1.6 var(--mono);color:var(--text-dim)}
+.pipeline-log .step-done{color:var(--ink)}
+.pipeline-log .step-warn{color:var(--warn)}
+.pipeline-log .step-waiting{color:rgba(255,255,255,0.15)}
 
-  .steps{display:flex;flex-direction:column;gap:10px;margin-bottom:var(--s-lg)}
-  .step{display:flex;gap:12px;align-items:flex-start;font-size:14px}
-  .dot{width:8px;height:8px;border-radius:var(--r-pill);background:var(--hairline-strong);
-       margin-top:7px;flex:none}
-  .dot.on{background:var(--primary)} .dot.warn{background:var(--warning)}
-  .step .name{width:92px;color:var(--muted);flex:none;font-size:13px}
+audio{display:none}
 
-  table{width:100%;border-collapse:collapse;font-size:14px}
-  th{text-align:left;color:var(--muted);font-weight:600;padding:8px;
-     border-bottom:1px solid var(--hairline);font-size:12px;letter-spacing:1.5px;
-     text-transform:uppercase}
-  td{padding:10px 8px;border-bottom:1px solid var(--hairline);vertical-align:top;
-     color:var(--body)}
-  tr:last-child td{border-bottom:0}
+/* ── filmstrip rail ── */
+.filmstrip{border-top:1px solid var(--border);background:var(--surface);
+           overflow-x:auto;overflow-y:hidden;white-space:nowrap;padding:12px 24px;
+           scrollbar-width:thin;scrollbar-color:var(--border) transparent;
+           -webkit-overflow-scrolling:touch}
+.filmstrip::-webkit-scrollbar{height:4px}
+.filmstrip::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.film-thumb{display:inline-block;width:140px;margin-right:8px;cursor:pointer;
+            vertical-align:top;opacity:.5;transition:opacity .2s ease;flex:none}
+.film-thumb:hover,.film-thumb.sel{opacity:1}
+.film-thumb.sel{outline:1px solid var(--ink);outline-offset:2px;border-radius:2px}
+.film-thumb img{width:140px;height:80px;object-fit:cover;display:block;border-radius:2px;
+                background:var(--surface-card)}
+.film-thumb-title{font:400 11px/1.3 var(--sans);color:var(--text-dim);
+                  margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-  /* Numbers are the product. Yellow for the measured value, per the system's
-     yellow-stat-number convention; semantic green/red only for pass and fail. */
-  .num{font-variant-numeric:tabular-nums;font-family:var(--mono);color:var(--primary)}
-  .stat{font:700 56px/1 var(--sans);letter-spacing:-1.5px;color:var(--primary)}
-  .v-fail{color:var(--error);font-weight:600}
-  .v-pass{color:var(--success);font-weight:600}
-  .arrow{color:var(--muted-soft);padding:0 8px}
+/* ── below-fold sections ── */
+.sections{max-width:1200px;margin:0 auto;padding:48px 24px}
+.section{margin-bottom:48px}
+.section-label{font:500 14px/1 var(--sans);text-transform:uppercase;
+               letter-spacing:0.35px;color:var(--text-secondary);margin-bottom:16px}
 
-  .note{background:var(--surface-soft);border-left:2px solid var(--primary);
-        padding:14px 16px;border-radius:0 var(--r-md) var(--r-md) 0;
-        font-size:14px;margin-top:var(--s-md);color:var(--body)}
-  .repro{font-family:var(--mono);font-size:13px;background:var(--surface-soft);
-         border:1px solid var(--hairline);border-radius:var(--r-md);
-         padding:14px 16px;color:var(--body);overflow-x:auto;white-space:pre;
-         margin-top:10px;line-height:1.55}
-  a{color:var(--primary);text-decoration:none}
-  a:hover{text-decoration:underline}
+/* check sheet */
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;color:var(--text-secondary);font-weight:500;padding:8px 8px 8px 0;
+   border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;
+   letter-spacing:0.35px}
+td{padding:8px 8px 8px 0;border-bottom:1px solid var(--border);color:var(--ink);
+   vertical-align:top}
+tr:last-child td{border-bottom:0}
+.num{font-variant-numeric:tabular-nums;font-family:var(--mono)}
+.v-pass{color:var(--success)}
+.v-fail{color:var(--error)}
+.check-name{color:var(--ink);font-size:13px}
+.check-spec{color:var(--text-dim);font-size:11px;font-family:var(--mono)}
 
-  audio{width:100%;margin-top:var(--s-xs);height:34px;
-        border-radius:var(--r-md);background:var(--surface-elevated);
-        color-scheme:dark;filter:invert(92%) hue-rotate(180deg)}
-  .ab{display:grid;grid-template-columns:1fr 1fr;gap:var(--s-md);margin-top:var(--s-xs)}
-  @media(max-width:640px){.ab{grid-template-columns:1fr}}
-  .lbl{font-size:12px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;
-       font-weight:600}
-  .hint{font-size:14px;color:var(--muted);letter-spacing:0;text-transform:none;
-        font-weight:400;line-height:1.55;max-width:78ch}
-  .hint code{font-family:var(--mono);font-size:13px;color:var(--body-strong)}
-  .empty{color:var(--muted-soft);font-size:14px}
+/* loudness profile SVG */
+.profile-chart{margin-top:8px}
+.profile-chart svg{display:block}
+.profile-cost{font:400 12px/1.4 var(--mono);color:var(--text-dim);margin-top:8px}
+
+/* catalog */
+.catalog-table td{font-size:13px;padding:6px 8px 6px 0}
+.catalog-table th{font-size:10px;padding:6px 8px 6px 0}
+
+/* supervisor disclosure */
+details{border:1px solid var(--border);border-radius:4px;padding:0}
+details summary{padding:12px 16px;font:500 14px/1 var(--sans);color:var(--text-secondary);
+                cursor:pointer;list-style:none;letter-spacing:-0.16px}
+details summary::-webkit-details-marker{display:none}
+details summary::before{content:'+ ';font-family:var(--mono);color:var(--text-dim)}
+details[open] summary::before{content:'- '}
+details summary:hover{color:var(--ink)}
+.disclosure-body{padding:0 16px 16px;font-size:14px}
+.trace-block{font:400 12px/1.5 var(--mono);color:var(--text-dim);background:var(--surface-card);
+             border:1px solid var(--border);border-radius:4px;padding:12px;
+             overflow-x:auto;white-space:pre;margin-top:8px}
+.note{font-size:14px;color:var(--text-muted);line-height:1.4;margin-top:8px}
+a{color:var(--text-secondary);text-decoration:none}
+a:hover{color:var(--ink)}
+.hint-text{font:400 13px/1.4 var(--sans);color:var(--text-dim);max-width:70ch}
+.empty-msg{color:var(--text-dim);font-size:13px}
 </style>
 </head>
 <body>
-<header>
-  <h1 class="wordmark">DELIVERABLE</h1>
-  <span class="sub">Measures a film master against broadcast spec, repairs what is repairable,
-  and re-measures to prove the repair. Gemini and ADK on Google Cloud, telemetry in ClickHouse.</span>
-</header>
 
-<main>
-  <div class="row">
-    <div>
-      <div class="panel">
-        <h2>PUBLIC-DOMAIN TITLES</h2>
-        <div id="titles"><span class="empty">Loading from archive.org…</span></div>
-        <button id="go" disabled>Run delivery QC</button>
-        <div class="repro" id="src" style="display:none"></div>
+<!-- ════ FIRST VIEWPORT ════ -->
+<div class="hero">
+  <!-- LEFT: film still -->
+  <div class="hero-still" id="still-wrap">
+    <img id="still-img" src="" alt="">
+    <div class="still-meta">
+      <div class="still-title" id="still-title"></div>
+      <div class="still-id" id="still-id"></div>
+    </div>
+  </div>
+
+  <!-- RIGHT: loudness meter bay -->
+  <div class="hero-right">
+    <div class="meter-wrap">
+      <!-- meter scale -->
+      <div style="position:relative;width:90px;flex:none">
+        <div class="meter" id="meter">
+          <div class="meter-bar bar-before" id="bar-before" style="height:0"></div>
+          <div class="meter-bar bar-after" id="bar-after" style="height:0"></div>
+        </div>
+        <!-- scale labels drawn by JS -->
+      </div>
+
+      <!-- LUFS readout -->
+      <div class="lufs-readout" id="lufs-readout">
+        <div class="lufs-empty" id="lufs-empty">Select a title below, then measure and repair.</div>
+        <div class="lufs-pair" id="lufs-pair" hidden>
+          <span class="lufs-number" id="lufs-before"></span>
+          <span class="lufs-arrow" id="lufs-arrow" hidden>&rarr;</span>
+          <span class="lufs-number" id="lufs-after"></span>
+        </div>
+        <div class="lufs-unit" id="lufs-label" hidden>LUFS integrated</div>
+        <div class="lufs-spec">EBU R128 target: -23 LUFS, +/- 1 LU</div>
       </div>
     </div>
 
-    <div>
-      <div class="panel">
-        <h2>AGENT PIPELINE</h2>
-        <div id="headline" class="empty" style="margin-bottom:16px">
-          Pick a title and run a QC pass. The number that decides delivery appears here.
-        </div>
-        <div class="steps" id="steps"></div>
-        <div id="verdict"></div>
-      </div>
+    <!-- pipeline log (appears inline during a run) -->
+    <div class="pipeline-log" id="pipeline-log"></div>
 
-      <div class="panel" id="audio-panel" hidden>
-        <h2>HEAR THE DEFECT</h2>
-        <div class="ab">
-          <div><div class="lbl">BEFORE</div><audio id="a-before" controls preload="none"></audio></div>
-          <div><div class="lbl">AFTER</div><audio id="a-after" controls preload="none"></audio></div>
-        </div>
-      </div>
+    <!-- transport + primary -->
+    <div class="controls">
+      <button class="btn btn-transport" id="play-before" disabled>play the illegal master</button>
+      <button class="btn btn-transport" id="play-after" disabled>play the repaired master</button>
+      <button class="btn btn-primary" id="go" disabled>Measure and repair</button>
+    </div>
+  </div>
+</div>
 
-      <div class="panel" id="profile-panel" hidden>
-        <h2>SUSTAINED LOUDNESS — quantileTDigest OVER THE 100ms STREAM</h2>
-        <div id="profile"><span class="empty">Run a QC pass to see the percentile profile.</span></div>
-      </div>
+<!-- hidden audio elements -->
+<audio id="a-before" preload="none"></audio>
+<audio id="a-after" preload="none"></audio>
 
-      <div class="panel" >
-        <h2>SUPERVISOR AGENT — THE QUERIES IT CHOSE</h2>
-        <div class="hint" style="margin-bottom:12px">
-          A Google ADK <code>LlmAgent</code> holding the official <code>mcp-clickhouse</code>
-          MCP server as an <code>McpToolset</code>. Nothing below is written by us: the agent
-          discovers the schema, then decides what to ask.
-        </div>
-        <button id="review" disabled>Review this title against the catalog</button>
+<!-- ════ FILMSTRIP RAIL ════ -->
+<div class="filmstrip" id="filmstrip"></div>
+
+<!-- ════ BELOW THE FOLD ════ -->
+<div class="sections">
+
+  <!-- 1. Check sheet -->
+  <div class="section" id="checksheet-section" hidden>
+    <div class="section-label">Check sheet</div>
+    <div id="checksheet"></div>
+  </div>
+
+  <!-- 2. Sustained loudness profile -->
+  <div class="section" id="profile-section" hidden>
+    <div class="section-label">Sustained loudness</div>
+    <div id="profile"></div>
+  </div>
+
+  <!-- 3. Catalog -->
+  <div class="section" id="catalog-section">
+    <div class="section-label">Catalog</div>
+    <div id="catalog"><span class="empty-msg">Loading catalog from ClickHouse...</span></div>
+  </div>
+
+  <!-- 4. Supervisor -->
+  <div class="section">
+    <details id="supervisor-details">
+      <summary>What the agent asked ClickHouse</summary>
+      <div class="disclosure-body">
+        <p class="hint-text">
+          A Google ADK LlmAgent holding the official mcp-clickhouse MCP server as an McpToolset.
+          The queries below were chosen by the agent, not written by us.
+        </p>
+        <button class="btn btn-transport" id="review" disabled style="margin-top:12px">
+          Review this title against the catalog
+        </button>
         <div id="trace"></div>
+        <div style="margin-top:12px">
+          <a href="/api/mcp-transcript" style="font-size:12px;font-family:var(--mono)">raw MCP transcript</a>
+        </div>
       </div>
-    </div>
+    </details>
   </div>
-
-  <div class="panel" >
-    <h2>CATALOG — READ THROUGH mcp-clickhouse</h2>
-    <div id="catalog"><span class="empty">Loading…</span></div>
-  </div>
-</main>
+</div>
 
 <script>
+/* ── state ── */
 const STEPS = ["ingest","measure","classify","remediate","verify","report"];
-let selected = null, job = null;
+let selected = null, job = null, titles = [];
+const aBefore = document.getElementById("a-before");
+const aAfter  = document.getElementById("a-after");
 
-async function loadProfile(titleId){
-  const box = document.getElementById("profile");
-  try{
-    const r = await fetch("/api/loudness-profile/"+titleId).then(r=>r.json());
-    if(!r.profile || !r.profile.length){
-      document.getElementById("profile-panel").hidden = true; return;
-    }
-    document.getElementById("profile-panel").hidden = false;
-    const rows = r.profile.map(p=>`<tr>
-        <td>${p.stage}</td>
-        <td class="num">${p.samples.toLocaleString()}</td>
-        <td class="num">${p.min}</td>
-        <td class="num">${p.p05}</td>
-        <td class="num">${p.median}</td>
-        <td class="num">${p.p95}</td>
-        <td class="num">${p.max}</td>
-        <td class="num">${p.sustained_range_lu}</td>
-      </tr>`).join("");
-    box.innerHTML = `<table>
-        <tr><th>STAGE</th><th>SAMPLES</th><th>MIN</th><th>p05</th><th>MEDIAN</th>
-            <th>p95</th><th>MAX</th><th>SUSTAINED RANGE</th></tr>${rows}</table>
-      <div class="hint" style="margin-top:12px">
-        ${r.computed_with}. Percentiles, not min/max: one 100ms spike is not a delivery
-        problem, and a wide sustained range is a mastering issue one normalisation pass
-        will not fix.
-      </div>
-      ${r.query_cost ? `<div class="repro" style="margin-top:8px">that query cost ${r.query_cost.duration_ms} ms, read ${r.query_cost.rows_read.toLocaleString()} rows (${r.query_cost.bytes_read}) — from ${r.query_cost.source}</div>` : ""}`;
-  }catch(e){ box.innerHTML = '<span class="empty">Profile unavailable.</span>'; }
+/* ── meter geometry ── */
+const METER_MIN = -40, METER_MAX = 0, TARGET = -23;
+function lufsToPercent(lufs){
+  if(lufs==null) return 0;
+  const clamped = Math.max(METER_MIN, Math.min(METER_MAX, lufs));
+  return ((clamped - METER_MIN) / (METER_MAX - METER_MIN)) * 100;
 }
 
+function initMeter(){
+  const meter = document.getElementById("meter");
+  // draw target line at -23
+  const targetPct = lufsToPercent(TARGET);
+  const line = document.createElement("div");
+  line.className = "meter-target";
+  line.style.bottom = targetPct + "%";
+  meter.appendChild(line);
+  // draw +/-1 band
+  const bandLow = lufsToPercent(TARGET - 1);
+  const bandHigh = lufsToPercent(TARGET + 1);
+  const band = document.createElement("div");
+  band.className = "meter-band";
+  band.style.bottom = bandLow + "%";
+  band.style.height = (bandHigh - bandLow) + "%";
+  meter.appendChild(band);
+  // scale labels
+  const wrap = meter.parentElement;
+  [-40,-30,-23,-20,-10,0].forEach(v=>{
+    const pct = lufsToPercent(v);
+    const lbl = document.createElement("div");
+    lbl.className = "meter-label";
+    lbl.style.bottom = pct + "%";
+    lbl.style.left = "calc(100% + 6px)";
+    lbl.textContent = v;
+    lbl.style.position = "absolute";
+    lbl.style.transform = "translateY(50%)";
+    lbl.style.fontSize = v === -23 ? "11px" : "10px";
+    lbl.style.fontWeight = v === -23 ? "500" : "400";
+    lbl.style.color = v === -23 ? "var(--ink)" : "var(--text-dim)";
+    wrap.appendChild(lbl);
+  });
+}
+
+function setMeterBars(beforeLufs, afterLufs){
+  document.getElementById("bar-before").style.height = lufsToPercent(beforeLufs) + "%";
+  document.getElementById("bar-after").style.height = afterLufs != null ? lufsToPercent(afterLufs) + "%" : "0";
+}
+
+function lufsColor(lufs){
+  if(lufs == null) return "var(--text-dim)";
+  if(lufs >= TARGET - 1 && lufs <= TARGET + 1) return "var(--success)";
+  return "var(--error)";
+}
+
+function showLufs(beforeVal, afterVal){
+  const pair = document.getElementById("lufs-pair");
+  const lbl = document.getElementById("lufs-label");
+  const empty = document.getElementById("lufs-empty");
+  const arrow = document.getElementById("lufs-arrow");
+  const bEl = document.getElementById("lufs-before");
+  const aEl = document.getElementById("lufs-after");
+
+  empty.hidden = true;
+  pair.hidden = false;
+  lbl.hidden = false;
+
+  bEl.textContent = beforeVal != null ? beforeVal : "--";
+  bEl.style.color = lufsColor(beforeVal);
+
+  if(afterVal != null){
+    arrow.hidden = false;
+    aEl.textContent = afterVal;
+    aEl.style.color = lufsColor(afterVal);
+    setMeterBars(beforeVal, afterVal);
+  } else {
+    arrow.hidden = true;
+    aEl.textContent = "";
+    setMeterBars(beforeVal, null);
+  }
+}
+
+function resetLufs(){
+  document.getElementById("lufs-pair").hidden = true;
+  document.getElementById("lufs-label").hidden = true;
+  document.getElementById("lufs-empty").hidden = false;
+  document.getElementById("lufs-empty").textContent = "Select a title below, then measure and repair.";
+  document.getElementById("bar-before").style.height = "0";
+  document.getElementById("bar-after").style.height = "0";
+  document.getElementById("lufs-arrow").hidden = true;
+}
+
+/* ── titles / filmstrip ── */
+function selectTitle(t, thumbEl){
+  selected = t;
+  document.querySelectorAll(".film-thumb").forEach(e=>e.classList.remove("sel"));
+  if(thumbEl) thumbEl.classList.add("sel");
+  // still
+  const img = document.getElementById("still-img");
+  img.classList.remove("loaded");
+  img.src = "https://archive.org/services/img/" + t.identifier;
+  img.onload = ()=> img.classList.add("loaded");
+  document.getElementById("still-title").textContent = t.title;
+  document.getElementById("still-id").textContent = t.identifier;
+  // enable controls
+  document.getElementById("go").disabled = false;
+  document.getElementById("review").disabled = false;
+  // load profile
+  loadProfile(t.identifier);
+  // reset meter state for new title
+  resetLufs();
+  document.getElementById("pipeline-log").innerHTML = "";
+  document.getElementById("checksheet-section").hidden = true;
+  document.getElementById("play-before").disabled = true;
+  document.getElementById("play-after").disabled = true;
+}
+
+async function loadTitles(){
+  const r = await fetch("/api/titles?rows=8").then(r=>r.json());
+  titles = r.titles;
+  const strip = document.getElementById("filmstrip");
+  strip.innerHTML = "";
+  titles.forEach((t,i)=>{
+    const thumb = document.createElement("div");
+    thumb.className = "film-thumb";
+    thumb.innerHTML = `<img src="https://archive.org/services/img/${t.identifier}" alt="" loading="lazy">
+      <div class="film-thumb-title">${t.title}</div>`;
+    thumb.onclick = ()=> selectTitle(t, thumb);
+    strip.appendChild(thumb);
+    if(i === 0) selectTitle(t, thumb);
+  });
+}
+
+/* ── pipeline rendering ── */
+function renderPipeline(steps){
+  const log = document.getElementById("pipeline-log");
+  log.innerHTML = STEPS.map(name=>{
+    const done = steps.find(s=>s.step===name);
+    if(done){
+      const cls = done.ok ? "step-done" : "step-warn";
+      return `<div class="${cls}">${name}  ${done.summary || ""}</div>`;
+    }
+    return `<div class="step-waiting">${name}</div>`;
+  }).join("");
+}
+
+/* ── verdict / check sheet ── */
+function renderVerdict(run){
+  const verify = (run.steps||[]).find(s=>s.step==="verify");
+  const report = (run.steps||[]).find(s=>s.step==="report");
+  if(!verify) return;
+
+  const before = verify.data.before, after = verify.data.after;
+
+  // loudness headline
+  const lb = before.find(b=>b.check==="integrated_loudness_ebu_r128");
+  const la = after.find(a=>a.check==="integrated_loudness_ebu_r128");
+  if(lb && la){
+    showLufs(parseFloat(lb.measured), parseFloat(la.measured));
+  } else {
+    const failsBefore = before.filter(b=>!b.passed).length;
+    const failsAfter = after.filter(a=>!a.passed).length;
+    showLufs(-failsBefore, -failsAfter);
+  }
+
+  // check sheet table
+  const rows = before.map(b=>{
+    const a = after.find(x=>x.check===b.check) || b;
+    return `<tr>
+      <td><span class="check-name">${b.check.replace(/_/g," ")}</span><br>
+          <span class="check-spec">${b.spec}</span></td>
+      <td class="num ${b.passed?'v-pass':'v-fail'}">${b.measured ?? "--"} ${b.unit}</td>
+      <td class="num ${a.passed?'v-pass':'v-fail'}">${a.measured ?? "--"} ${a.unit}</td>
+      <td class="${a.passed?'v-pass':'v-fail'}">${a.passed?"pass":"fail"}</td>
+    </tr>`;
+  }).join("");
+
+  const cs = document.getElementById("checksheet");
+  cs.innerHTML = `<table>
+    <tr><th>check</th><th>measured</th><th>after</th><th></th></tr>${rows}</table>
+    ${report ? `<p class="note">${report.summary}</p>` : ""}`;
+  document.getElementById("checksheet-section").hidden = false;
+}
+
+/* ── loudness profile SVG ── */
+async function loadProfile(titleId){
+  const box = document.getElementById("profile");
+  const sec = document.getElementById("profile-section");
+  try{
+    const r = await fetch("/api/loudness-profile/"+titleId).then(r=>r.json());
+    if(!r.profile || !r.profile.length){ sec.hidden = true; return; }
+    sec.hidden = false;
+
+    // draw SVG range bars for each stage
+    const svgW = 600, barH = 28, gap = 4, padL = 70, padR = 20;
+    const stages = r.profile;
+    const svgH = stages.length * (barH + gap) + 16;
+    const scaleMin = -50, scaleMax = 0;
+    const x = v => padL + ((v - scaleMin) / (scaleMax - scaleMin)) * (svgW - padL - padR);
+
+    let svg = `<svg viewBox="0 0 ${svgW} ${svgH}" width="100%" style="max-width:${svgW}px" xmlns="http://www.w3.org/2000/svg">`;
+    // target line at -23
+    const tx = x(-23);
+    svg += `<line x1="${tx}" y1="0" x2="${tx}" y2="${svgH}" stroke="#fff" stroke-width="1" opacity="0.3"/>`;
+    svg += `<text x="${tx}" y="10" fill="#767d88" font-size="9" font-family="JetBrains Mono,monospace" text-anchor="middle">-23</text>`;
+
+    stages.forEach((p, i) => {
+      const cy = 16 + i * (barH + gap) + barH / 2;
+      const y1 = cy - barH / 2 + 2;
+      // label
+      svg += `<text x="${padL - 6}" y="${cy + 4}" fill="#767d88" font-size="11" font-family="DM Sans,sans-serif" text-anchor="end">${p.stage}</text>`;
+      // p05-p95 range bar
+      const x1 = x(p.p05), x2 = x(p.p95);
+      svg += `<rect x="${x1}" y="${y1}" width="${Math.max(2, x2 - x1)}" height="${barH - 4}" rx="2" fill="rgba(255,255,255,0.12)"/>`;
+      // median tick
+      const mx = x(p.median);
+      svg += `<line x1="${mx}" y1="${y1}" x2="${mx}" y2="${y1 + barH - 4}" stroke="#fff" stroke-width="2"/>`;
+      // min/max whiskers
+      const xMin = x(p.min), xMax = x(p.max);
+      svg += `<line x1="${xMin}" y1="${cy}" x2="${x1}" y2="${cy}" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>`;
+      svg += `<line x1="${x2}" y1="${cy}" x2="${xMax}" y2="${cy}" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>`;
+      // value labels
+      svg += `<text x="${x2 + 6}" y="${cy + 4}" fill="#a7a7a7" font-size="10" font-family="JetBrains Mono,monospace">${p.sustained_range_lu} LU range</text>`;
+    });
+    svg += `</svg>`;
+
+    box.innerHTML = `<div class="profile-chart">${svg}</div>
+      <p class="hint-text" style="margin-top:8px">${r.computed_with || "quantileTDigest"}. Percentiles, not min/max: a single 100ms spike is not a delivery problem.</p>
+      ${r.query_cost ? `<div class="profile-cost">${r.query_cost.duration_ms}ms, ${r.query_cost.rows_read.toLocaleString()} rows (${r.query_cost.bytes_read}) from ${r.query_cost.source}</div>` : ""}`;
+  }catch(e){
+    sec.hidden = true;
+  }
+}
+
+/* ── catalog ── */
 async function loadCatalog(){
   const box = document.getElementById("catalog");
   try{
     const r = await fetch("/api/catalog").then(r=>r.json());
-    if(r.warming){ box.innerHTML = '<span class="empty">ClickHouse is starting…</span>';
-                   return setTimeout(loadCatalog, 4000); }
+    if(r.warming){
+      box.innerHTML = '<span class="empty-msg">ClickHouse is starting...</span>';
+      return setTimeout(loadCatalog, 4000);
+    }
     if(!r.catalog || !r.catalog.length){
-      box.innerHTML = '<span class="empty">No titles measured yet. Run a QC pass above.</span>';
+      box.innerHTML = '<span class="empty-msg">No titles measured yet. Run a QC pass above.</span>';
       return;
     }
     const rows = r.catalog.map(c=>`<tr>
-        <td>${c.title}</td>
-        <td class="num ${c.failures_before>0?'v-fail':'v-pass'}">${c.failures_before}</td>
-        <td class="arrow">→</td>
-        <td class="num ${c.failures_after>0?'v-fail':'v-pass'}">${c.failures_after}</td>
-        <td class="${c.verdict==='delivery ready'?'v-pass':'v-fail'}">${c.verdict}</td>
-      </tr>`).join("");
-    box.innerHTML = `<table>
-        <tr><th>TITLE</th><th>FAILURES BEFORE</th><th></th><th>AFTER</th><th>VERDICT</th></tr>
-        ${rows}</table>
-      <div class="hint" style="margin-top:12px">
-        Read via <code>${r.via}</code> · <a href="/api/mcp-transcript" style="color:var(--accent)">see the raw MCP tool call</a>
-      </div>`;
-  }catch(e){ box.innerHTML = '<span class="empty">Catalog unavailable.</span>'; }
+      <td>${c.title}</td>
+      <td class="num ${c.failures_before>0?'v-fail':'v-pass'}">${c.failures_before}</td>
+      <td style="color:var(--text-dim)">&rarr;</td>
+      <td class="num ${c.failures_after>0?'v-fail':'v-pass'}">${c.failures_after}</td>
+      <td class="${c.verdict==='delivery ready'?'v-pass':'v-fail'}">${c.verdict}</td>
+    </tr>`).join("");
+    box.innerHTML = `<table class="catalog-table">
+      <tr><th>title</th><th>failures</th><th></th><th>after</th><th>verdict</th></tr>
+      ${rows}</table>
+      <p class="hint-text" style="margin-top:8px">Read via ${r.via}</p>`;
+  }catch(e){
+    box.innerHTML = '<span class="empty-msg">Catalog unavailable.</span>';
+  }
 }
 
+/* ── supervisor review ── */
 async function runReview(){
   if(!selected) return;
   const btn = document.getElementById("review");
   const box = document.getElementById("trace");
   btn.disabled = true;
-  box.innerHTML = '<div class="hint" style="margin-top:12px">Agent working… it chooses its own queries, so this takes a few seconds.</div>';
+  box.innerHTML = '<p class="note">Agent working... it chooses its own queries.</p>';
   try{
     const r = await fetch("/api/review/"+selected.identifier).then(r=>r.json());
-    if(r.detail){ box.innerHTML = `<div class="note">${r.detail}</div>`; btn.disabled=false; return; }
+    if(r.detail){ box.innerHTML = `<p class="note">${r.detail}</p>`; btn.disabled=false; return; }
     const calls = (r.tool_calls||[]).map((t,i)=>
-      `<div class="repro" style="margin-top:6px">${i+1}. ${t.tool}
-${(t.args && (t.args.query || JSON.stringify(t.args))) || ""}</div>`).join("");
+      `<div class="trace-block">${i+1}. ${t.tool}\n${(t.args && (t.args.query || JSON.stringify(t.args))) || ""}</div>`).join("");
     box.innerHTML = `
-      <div class="hint" style="margin-top:12px">
-        ${(r.tool_calls||[]).length} MCP tool calls · framework ${r.framework} · model ${r.model}
-      </div>
+      <p class="note" style="margin-top:12px">${(r.tool_calls||[]).length} MCP tool calls, framework ${r.framework}, model ${r.model}</p>
       ${calls}
-      ${r.note ? `<div class="note">${r.note.replace(/\n/g,"<br>")}</div>` : ""}`;
-  }catch(e){ box.innerHTML = `<div class="note">Review failed: ${e}</div>`; }
+      ${r.note ? `<p class="note">${r.note.replace(/\n/g,"<br>")}</p>` : ""}`;
+  }catch(e){ box.innerHTML = `<p class="note">Review failed: ${e}</p>`; }
   btn.disabled = false;
 }
 document.getElementById("review").onclick = runReview;
 
-async function loadTitles(){
-  const r = await fetch("/api/titles?rows=8").then(r=>r.json());
-  const box = document.getElementById("titles");
-  box.innerHTML = "";
-  r.titles.forEach(t=>{
-    const d = document.createElement("div");
-    d.className = "title-item";
-    d.textContent = t.title + (t.subtitle ? "  · subtitles" : "");
-    d.onclick = ()=>{
-      selected = t;
-      [...box.children].forEach(c=>c.classList.remove("sel"));
-      d.classList.add("sel");
-      document.getElementById("go").disabled = false;
-      document.getElementById("review").disabled = false;
-      loadProfile(t.identifier);
-      const s = document.getElementById("src");
-      s.style.display = "block";
-      s.textContent = "archive.org/download/" + t.identifier + "/" + t.video;
-    };
-    box.appendChild(d);
-  });
+/* ── transport controls ── */
+let playing = null;
+function stopAll(){ aBefore.pause(); aAfter.pause(); playing = null;
+  document.getElementById("play-before").textContent = "play the illegal master";
+  document.getElementById("play-after").textContent = "play the repaired master";
 }
+aBefore.onended = ()=> stopAll();
+aAfter.onended = ()=> stopAll();
 
-function renderSteps(steps){
-  const box = document.getElementById("steps");
-  box.innerHTML = "";
-  STEPS.forEach(name=>{
-    const done = steps.find(s=>s.step===name);
-    const el = document.createElement("div");
-    el.className = "step";
-    el.innerHTML = `<div class="dot ${done ? (done.ok?'on':'warn') : ''}"></div>
-      <div class="name">${name}</div>
-      <div>${done ? done.summary : '<span class="empty">waiting</span>'}</div>`;
-    box.appendChild(el);
-  });
-}
+document.getElementById("play-before").onclick = ()=>{
+  if(playing === "before"){ stopAll(); return; }
+  stopAll(); aBefore.play(); playing = "before";
+  document.getElementById("play-before").textContent = "stop";
+};
+document.getElementById("play-after").onclick = ()=>{
+  if(playing === "after"){ stopAll(); return; }
+  stopAll(); aAfter.play(); playing = "after";
+  document.getElementById("play-after").textContent = "stop";
+};
 
-function renderVerdict(run){
-  const verify = (run.steps||[]).find(s=>s.step==="verify");
-  const report = (run.steps||[]).find(s=>s.step==="report");
-  const out = document.getElementById("verdict");
-  if(!verify){ out.innerHTML=""; return; }
-
-  const before = verify.data.before, after = verify.data.after;
-
-  // The headline number: loudness is the check that carries the story, so the
-  // before/after pair is stated once at stat scale rather than only living in a
-  // table row. Falls back to the failure count when there is no loudness check.
-  const lb = before.find(b=>b.check==="integrated_loudness_ebu_r128");
-  const la = after.find(a=>a.check==="integrated_loudness_ebu_r128");
-  const head = document.getElementById("headline");
-  if(head){
-    if(lb && la){
-      head.className = "";
-      head.innerHTML = `<div class="lbl">INTEGRATED LOUDNESS, EBU R128 TARGET -23 LUFS</div>
-        <div style="display:flex;align-items:baseline;gap:16px;margin-top:8px;flex-wrap:wrap">
-          <span class="stat" style="color:${lb.passed?'var(--success)':'var(--error)'}">${lb.measured}</span>
-          <span class="arrow" style="font-size:24px">-&gt;</span>
-          <span class="stat" style="color:${la.passed?'var(--success)':'var(--error)'}">${la.measured}</span>
-          <span class="lbl" style="letter-spacing:1.5px">LUFS</span>
-        </div>`;
-    } else {
-      head.className = "";
-      head.innerHTML = `<div class="lbl">FAILURES</div>
-        <div style="display:flex;align-items:baseline;gap:16px;margin-top:8px">
-          <span class="stat">${before.filter(b=>!b.passed).length}</span>
-          <span class="arrow" style="font-size:24px">-&gt;</span>
-          <span class="stat">${after.filter(a=>!a.passed).length}</span>
-        </div>`;
-    }
-  }
-
-  const rows = before.map(b=>{
-    const a = after.find(x=>x.check===b.check) || b;
-    return `<tr>
-      <td>${b.check.replace(/_/g," ")}<br><span class="hint" style="font-size:12px">${b.spec}</span></td>
-      <td class="num ${b.passed?'v-pass':'v-fail'}">${b.measured ?? "-"} ${b.unit}</td>
-      <td class="arrow">→</td>
-      <td class="num ${a.passed?'v-pass':'v-fail'}">${a.measured ?? "-"} ${a.unit}</td>
-      <td class="${a.passed?'v-pass':'v-fail'}">${a.passed?"PASS":"FAIL"}</td>
-    </tr>`;
-  }).join("");
-
-  out.innerHTML = `<table>
-      <tr><th>CHECK</th><th>BEFORE</th><th></th><th>AFTER</th><th></th></tr>${rows}
-    </table>
-    ${report ? `<div class="note">${report.summary}</div>` : ""}
-    <div class="repro">Verify it yourself:
-ffmpeg -i "${selected ? selected.video : "source.mp4"}" -af ebur128 -f null -</div>`;
-}
-
+/* ── poll ── */
 async function poll(){
   const run = await fetch("/api/run/"+job).then(r=>r.json());
-  renderSteps(run.steps||[]);
+  renderPipeline(run.steps||[]);
   if(run.state==="done"){
     renderVerdict(run);
-    document.getElementById("a-before").src = "/api/audio/"+job+"/before";
-    document.getElementById("a-after").src  = "/api/audio/"+job+"/after";
-    document.getElementById("audio-panel").hidden = false;
+    aBefore.src = "/api/audio/"+job+"/before";
+    aAfter.src  = "/api/audio/"+job+"/after";
+    document.getElementById("play-before").disabled = false;
+    document.getElementById("play-after").disabled = false;
     document.getElementById("go").disabled = false;
     loadCatalog();
     if(selected) loadProfile(selected.identifier);
     return;
   }
   if(run.state==="failed"){
-    document.getElementById("verdict").innerHTML =
-      `<div class="note">Run failed: ${run.error}</div>`;
+    document.getElementById("pipeline-log").innerHTML =
+      `<div class="step-warn">failed: ${run.error}</div>`;
     document.getElementById("go").disabled = false;
     return;
   }
   setTimeout(poll, 2000);
 }
 
+/* ── primary action ── */
 document.getElementById("go").onclick = async ()=>{
   if(!selected) return;
+  stopAll();
   document.getElementById("go").disabled = true;
-  document.getElementById("verdict").innerHTML = "";
-  renderSteps([]);
+  document.getElementById("play-before").disabled = true;
+  document.getElementById("play-after").disabled = true;
+  document.getElementById("checksheet-section").hidden = true;
+  resetLufs();
+  document.getElementById("lufs-empty").hidden = true;
+  renderPipeline([]);
   job = (await fetch("/api/run/"+selected.identifier, {method:"POST"}).then(r=>r.json())).job;
   poll();
 };
 
+/* ── init ── */
+initMeter();
 loadTitles();
 loadCatalog();
 </script>
