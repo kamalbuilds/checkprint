@@ -86,6 +86,11 @@
       </div>
 
       <div class="panel" style="margin-top:20px">
+        <h2>SUSTAINED LOUDNESS — quantileTDigest OVER THE 100ms STREAM</h2>
+        <div id="profile"><span class="empty">Run a QC pass to see the percentile profile.</span></div>
+      </div>
+
+      <div class="panel" style="margin-top:20px">
         <h2>SUPERVISOR AGENT — THE QUERIES IT CHOSE</h2>
         <div class="lbl" style="margin-bottom:10px">
           A Google ADK <code>LlmAgent</code> holding the official <code>mcp-clickhouse</code>
@@ -107,6 +112,34 @@
 <script>
 const STEPS = ["ingest","measure","classify","remediate","verify","report"];
 let selected = null, job = null;
+
+async function loadProfile(titleId){
+  const box = document.getElementById("profile");
+  try{
+    const r = await fetch("/api/loudness-profile/"+titleId).then(r=>r.json());
+    if(!r.profile || !r.profile.length){
+      box.innerHTML = '<span class="empty">No samples for this title yet.</span>'; return;
+    }
+    const rows = r.profile.map(p=>`<tr>
+        <td>${p.stage}</td>
+        <td class="num">${p.samples.toLocaleString()}</td>
+        <td class="num">${p.min}</td>
+        <td class="num">${p.p05}</td>
+        <td class="num">${p.median}</td>
+        <td class="num">${p.p95}</td>
+        <td class="num">${p.max}</td>
+        <td class="num">${p.sustained_range_lu}</td>
+      </tr>`).join("");
+    box.innerHTML = `<table>
+        <tr><th>STAGE</th><th>SAMPLES</th><th>MIN</th><th>p05</th><th>MEDIAN</th>
+            <th>p95</th><th>MAX</th><th>SUSTAINED RANGE</th></tr>${rows}</table>
+      <div class="lbl" style="margin-top:10px">
+        ${r.computed_with}. Percentiles, not min/max: one 100ms spike is not a delivery
+        problem, and a wide sustained range is a mastering issue one normalisation pass
+        will not fix.
+      </div>`;
+  }catch(e){ box.innerHTML = '<span class="empty">Profile unavailable.</span>'; }
+}
 
 async function loadCatalog(){
   const box = document.getElementById("catalog");
@@ -171,6 +204,7 @@ async function loadTitles(){
       d.classList.add("sel");
       document.getElementById("go").disabled = false;
       document.getElementById("review").disabled = false;
+      loadProfile(t.identifier);
       const s = document.getElementById("src");
       s.style.display = "block";
       s.textContent = "archive.org/download/" + t.identifier + "/" + t.video;
@@ -228,6 +262,7 @@ async function poll(){
     document.getElementById("a-after").src  = "/api/audio/"+job+"/after";
     document.getElementById("go").disabled = false;
     loadCatalog();
+    if(selected) loadProfile(selected.identifier);
     return;
   }
   if(run.state==="failed"){
