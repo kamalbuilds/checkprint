@@ -204,3 +204,78 @@ def test_percentiles_are_not_float32_noise(ch_samples):
                 "p95_short_term_lufs", "sustained_range_lu"):
         value = w[key]
         assert round(value, 1) == value, f"{key} = {value!r} is Float32 noise, not a 1dp number"
+
+
+# --- schema.sql must stay executable ---------------------------------------
+
+
+def test_schema_splitter_emits_no_comment_only_statements():
+    """A comment block before a statement must not be sent as its own query.
+
+    ClickHouse answers a comment-only query with
+    `Code: 62. DB::Exception: Empty query. (SYNTAX_ERROR)`, which broke schema
+    application on startup the moment a view grew a multi-line comment. Naive
+    sql.split(";") produced two such fragments.
+    """
+    from qc.store import _statements
+
+    sql = (Path(__file__).parent.parent / "qc" / "schema.sql").read_text()
+    for stmt in _statements(sql):
+        assert any(
+            line.strip() and not line.strip().startswith("--")
+            for line in stmt.splitlines()
+        ), f"comment-only statement would be sent to ClickHouse:\n{stmt[:200]}"
+
+
+def test_an_apostrophe_in_a_comment_does_not_desync_the_split():
+    """A `--` comment containing an apostrophe must not break statement splitting.
+
+    Observed for real: a comment reading "a title nobody touched" made the split
+    land mid-prose and ClickHouse reported
+    `Syntax error: failed at position 1 (calling)`. Every statement must still
+    begin with a SQL keyword.
+    """
+    from qc.store import _statements
+
+    sql = """
+-- A comment with an apostrophe: a title nobody touched is both odd and fine.
+CREATE TABLE a (x Int8) ENGINE = Memory;
+-- Another one, isn't it.
+CREATE TABLE b (y Int8) ENGINE = Memory;
+"""
+    stmts = _statements(sql)
+    assert len(stmts) == 2, f"apostrophe desynced the split: {stmts}"
+    for stmt in stmts:
+        assert stmt.upper().startswith("CREATE"), f"statement starts mid-prose: {stmt[:80]!r}"
+
+
+def test_every_schema_object_survives_the_splitter():
+    """The splitter must not drop real DDL while filtering comments."""
+    from qc.store import _statements
+
+    sql = (Path(__file__).parent.parent / "qc" / "schema.sql").read_text()
+    joined = "\n".join(_statements(sql))
+    for obj in ("deliverable.findings", "deliverable.loudness_samples",
+                "deliverable.catalog_status", "deliverable.worst_windows",
+                "deliverable.jobs"):
+        assert obj in joined, f"{obj} was dropped by the statement splitter"
+
+
+def test_schema_applies_cleanly_against_a_real_clickhouse(ch):
+    """End to end: the real schema must apply without a syntax error.
+
+    This is the check that would have caught the outage directly, rather than
+    inferring it from the splitter's output.
+    """
+    from qc.store import _statements
+
+    db = f"deliverable_apply_{uuid.uuid4().hex[:8]}"
+    sql = (Path(__file__).parent.parent / "qc" / "schema.sql").read_text()
+    sql = sql.replace("deliverable.", f"{db}.").replace(
+        "CREATE DATABASE IF NOT EXISTS deliverable", f"CREATE DATABASE IF NOT EXISTS {db}"
+    )
+    try:
+        for stmt in _statements(sql):
+            ch.command(stmt)
+    finally:
+        ch.command(f"DROP DATABASE IF EXISTS {db}")

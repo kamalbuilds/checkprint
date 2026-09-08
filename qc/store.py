@@ -50,8 +50,41 @@ def client():
 def apply_schema(ch=None) -> None:
     ch = ch or client()
     sql = (Path(__file__).with_name("schema.sql")).read_text()
-    for stmt in [s.strip() for s in sql.split(";") if s.strip()]:
+    for stmt in _statements(sql):
         ch.command(stmt)
+
+
+def _statements(sql: str) -> list[str]:
+    """Split schema.sql into executable statements.
+
+    Two things make a naive sql.split(";") wrong here, both observed in production:
+
+    1. A block of leading `--` comments becomes its own fragment once the previous
+       ';' is consumed, and ClickHouse rejects a comment-only statement with
+       `Code: 62. DB::Exception: Empty query. (SYNTAX_ERROR)`.
+    2. A `--` comment containing an apostrophe ("a title nobody touched") makes any
+       quote-aware splitter think a string literal is open, so the split lands in
+       the middle of prose and ClickHouse reports
+       `Syntax error: failed at position 1 (calling)`.
+
+    So comments are stripped first, and only then is the SQL split on ';'. The
+    comments are worth keeping in the file for whoever reads the schema; they are
+    simply not worth sending to the server.
+    """
+    lines = []
+    for line in sql.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("--"):
+            continue
+        # Trailing comment on a line of SQL. Only safe to cut when the '--' is not
+        # inside a string literal, so require an even number of quotes before it.
+        idx = line.find("--")
+        if idx != -1 and line[:idx].count("'") % 2 == 0:
+            line = line[:idx]
+        if line.strip():
+            lines.append(line)
+
+    return [stmt.strip() for stmt in "\n".join(lines).split(";") if stmt.strip()]
 
 
 def loudness_timeseries(path: str | Path, seconds: int | None = None) -> list[tuple]:
