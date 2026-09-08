@@ -115,3 +115,92 @@ def test_the_verdict_column_is_not_constant(ch):
     """A column with one value carries no information, however good it looks."""
     verdicts = {r[0] for r in ch.query(f"SELECT DISTINCT verdict FROM {DB}.catalog_status").result_rows}
     assert len(verdicts) >= 3, f"verdict barely discriminates: {verdicts}"
+
+
+# --- worst_windows: percentiles over the 100ms sample stream --------------
+
+
+@pytest.fixture(scope="module")
+def ch_samples(ch):
+    """A loudness_samples table plus the worst_windows view, in the test database."""
+    ch.command(f"""
+        CREATE TABLE IF NOT EXISTS {DB}.loudness_samples (
+            run_id UUID, title_id String, stage LowCardinality(String),
+            t_seconds Float32, momentary Float32, short_term Float32,
+            integrated Float32, true_peak Float32
+        ) ENGINE = MergeTree ORDER BY (title_id, stage, t_seconds)
+    """)
+    view_sql = (Path(__file__).parent.parent / "qc" / "schema.sql").read_text()
+    start = view_sql.index("CREATE OR REPLACE VIEW deliverable.worst_windows")
+    end = view_sql.index(";", view_sql.index("GROUP BY title_id, stage", start))
+    ch.command(view_sql[start:end].replace("deliverable.", f"{DB}."))
+
+    run = uuid.uuid4()
+    # 998 samples at -23, plus two one-sample spikes. A spike is not a sustained
+    # problem, which is the whole reason percentiles are used here.
+    rows = [[run, "pct", "before", float(i) / 10, -23.0, -23.0, -23.0, -5.0] for i in range(998)]
+    rows.append([run, "pct", "before", 99.8, -3.0, -3.0, -23.0, -5.0])
+    rows.append([run, "pct", "before", 99.9, -60.0, -60.0, -23.0, -5.0])
+    ch.insert(f"{DB}.loudness_samples", rows,
+              column_names=["run_id", "title_id", "stage", "t_seconds", "momentary",
+                            "short_term", "integrated", "true_peak"])
+
+    # A second title whose values are NOT exactly representable in Float32.
+    # This is what actually exercises the toFloat64 cast: -23.0 and -60.0 round-trip
+    # exactly, so a title built only from those can never reveal the noise bug.
+    # -40.3 stored as Float32 and read back through round(x, 1) without widening
+    # yields -40.29999923706055, which is what shipped to the UI before the fix.
+    noisy = [[run, "noise", "before", float(i) / 10, -40.3, -40.3, -40.3, -5.1]
+             for i in range(600)]
+    noisy += [[run, "noise", "before", 60.0 + float(i) / 10, -12.7, -12.7, -40.3, -5.1]
+              for i in range(400)]
+    ch.insert(f"{DB}.loudness_samples", noisy,
+              column_names=["run_id", "title_id", "stage", "t_seconds", "momentary",
+                            "short_term", "integrated", "true_peak"])
+    return ch
+
+
+def _window(ch, title_id="pct"):
+    cols = ("quietest_short_term_lufs,p05_short_term_lufs,median_short_term_lufs,"
+            "p95_short_term_lufs,loudest_short_term_lufs,sustained_range_lu,samples")
+    row = ch.query(
+        f"SELECT {cols} FROM {DB}.worst_windows WHERE title_id = %(t)s AND stage = 'before'",
+        parameters={"t": title_id},
+    ).result_rows[0]
+    return dict(zip(cols.split(","), row))
+
+
+def test_percentiles_ignore_a_single_spike_but_min_max_do_not(ch_samples):
+    """The point of the percentiles: one 100ms spike is not a delivery problem.
+
+    If p95 tracked max, an operator would be sent to a frame where nothing is
+    audibly wrong, which is what min()/max() alone did before.
+    """
+    w = _window(ch_samples)
+    assert w["loudest_short_term_lufs"] == -3.0, "max must still show the spike"
+    assert w["quietest_short_term_lufs"] == -60.0, "min must still show the dropout"
+    assert w["p95_short_term_lufs"] == -23.0, f"p95 followed the spike: {w}"
+    assert w["p05_short_term_lufs"] == -23.0, f"p05 followed the dropout: {w}"
+
+
+def test_sustained_range_is_zero_for_a_flat_title(ch_samples):
+    """A consistently-mastered title has no sustained spread, spikes notwithstanding."""
+    assert _window(ch_samples)["sustained_range_lu"] == 0.0
+
+
+def test_percentiles_are_not_float32_noise(ch_samples):
+    """round() on ClickHouse's Float32 quantile leaks its binary representation.
+
+    Observed before the toFloat64 cast: p05 came back as -40.29999923706055
+    instead of -40.3 and rendered as noise in the UI.
+
+    This asserts on the 'noise' title deliberately. An earlier version of this
+    test used only -23.0 and -60.0, which are exactly representable in Float32
+    and therefore survive round() unwidened, so the test passed with the cast
+    removed and proved nothing. -40.3 and -12.7 are not exact, and do reveal it.
+    """
+    w = _window(ch_samples, "noise")
+    for key in ("p05_short_term_lufs", "median_short_term_lufs",
+                "p95_short_term_lufs", "sustained_range_lu"):
+        value = w[key]
+        assert round(value, 1) == value, f"{key} = {value!r} is Float32 noise, not a 1dp number"

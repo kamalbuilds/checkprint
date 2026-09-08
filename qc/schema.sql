@@ -78,13 +78,36 @@ GROUP BY title_id;
 
 -- The worst sustained loudness window per title, which is what an operator
 -- actually needs in order to go and listen to the problem.
-CREATE VIEW IF NOT EXISTS deliverable.worst_windows AS
+--
+-- min()/max() over 100ms samples answer the wrong question: a single 100ms spike
+-- is not a delivery problem, and reporting it as "the loudest moment" sends an
+-- operator to a frame where nothing is audibly wrong. The percentiles are what a
+-- QC operator actually argues about, so they are computed with quantileTDigest,
+-- which is the estimator built for exactly this shape of data: tens of thousands
+-- of samples per title, streamed, where an exact quantile would mean holding the
+-- whole distribution in memory per group.
+--
+-- p95 is the sustained-loud end and p05 the sustained-quiet end; the raw min/max
+-- stay alongside them so the spike is still visible and nothing is hidden.
+CREATE OR REPLACE VIEW deliverable.worst_windows AS
 SELECT
     title_id,
     stage,
-    round(min(short_term), 1) AS quietest_short_term_lufs,
-    round(max(short_term), 1) AS loudest_short_term_lufs,
-    argMin(t_seconds, short_term) AS quietest_at_seconds
+    count()                                              AS samples,
+    round(toFloat64(min(short_term)), 1)                     AS quietest_short_term_lufs,
+    round(toFloat64(max(short_term)), 1)                     AS loudest_short_term_lufs,
+    -- toFloat64 before round() is load-bearing, not style: quantileTDigest returns
+    -- Float32, and round(Float32, 1) leaks the binary representation, so p05 came
+    -- back as -40.29999923706055 instead of -40.3 and rendered as noise in the UI.
+    round(toFloat64(quantileTDigest(0.05)(short_term)), 1)   AS p05_short_term_lufs,
+    round(toFloat64(quantileTDigest(0.50)(short_term)), 1)   AS median_short_term_lufs,
+    round(toFloat64(quantileTDigest(0.95)(short_term)), 1)   AS p95_short_term_lufs,
+    -- How wide the sustained range is: a large spread is a mastering problem a
+    -- single normalisation pass will not fix, and is worth a human's attention.
+    round(toFloat64(quantileTDigest(0.95)(short_term))
+        - toFloat64(quantileTDigest(0.05)(short_term)), 1)   AS sustained_range_lu,
+    argMin(t_seconds, short_term)                        AS quietest_at_seconds,
+    argMax(t_seconds, short_term)                        AS loudest_at_seconds
 FROM deliverable.loudness_samples
 WHERE short_term > -70
 GROUP BY title_id, stage;
