@@ -1,6 +1,5 @@
 <!-- ClickHouse config for self-hosted mode inside Cloud Run.
-     Cloud Run's filesystem is read-only except /tmp, so everything goes there.
-     Tuned for a single-node, low-memory (4 GiB) container. -->
+     Cloud Run's filesystem is read-only except /tmp, so everything goes there. -->
 <clickhouse>
     <path>/tmp/clickhouse/data/</path>
     <tmp_path>/tmp/clickhouse/tmp/</tmp_path>
@@ -21,4 +20,33 @@
     <mark_cache_size>134217728</mark_cache_size>
     <max_server_memory_usage_to_ram_ratio>0.5</max_server_memory_usage_to_ram_ratio>
     <max_concurrent_queries>20</max_concurrent_queries>
+
+    <!-- Users and profiles: required by APT-installed ClickHouse
+         (the static binary has these embedded, APT expects config files) -->
+    <profiles>
+        <default/>
+    </profiles>
+    <users>
+        <default>
+            <password></password>
+            <networks>
+                <ip>127.0.0.1</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <access_management>1</access_management>
+        </default>
+    </users>
+    <quotas>
+        <default>
+            <interval>
+                <duration>3600</duration>
+                <queries>0</queries>
+                <errors>0</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>0</execution_time>
+            </interval>
+        </default>
+    </quotas>
 </clickhouse>

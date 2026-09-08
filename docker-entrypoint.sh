@@ -9,10 +9,10 @@ if [ "${CLICKHOUSE_HOST:-localhost}" = "localhost" ]; then
   # Cloud Run filesystem is read-only except /tmp
   mkdir -p /tmp/clickhouse/{data,tmp,user_files,format_schemas,log}
 
-  # Start ClickHouse with /tmp-based config, fully backgrounded.
-  # APT-installed binary is at /usr/bin/clickhouse-server.
-  clickhouse-server --config-file=/app/clickhouse-local.xml --daemon 2>&1 || \
-    clickhouse-server --config-file=/app/clickhouse-local.xml &
+  # Start ClickHouse with our /tmp-based config only (skip /etc/clickhouse-server/).
+  # --daemon fails inside Cloud Run (no pidfile path), so background with &.
+  clickhouse-server --config-file=/app/clickhouse-local.xml \
+    -- --path /tmp/clickhouse/data/ 2>&1 &
 
   # Apply schema in a background subshell so uvicorn starts immediately
   (
