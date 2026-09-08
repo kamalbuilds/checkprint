@@ -46,6 +46,14 @@ ORDER BY (title_id, stage, t_seconds);
 -- Catalog verdict per title, from the LATEST run only.
 -- Aggregating across every historical run double-counts: re-running a title made
 -- failures_before jump from 4 to 8 with no change to the film.
+--
+-- The verdict distinguishes "we improved it but it is not shippable" from "we did
+-- nothing", because those are different facts for an operator and the earlier
+-- version reported them identically. A subtitle pass that takes cues below minimum
+-- duration from 44 to 12, and reading-speed failures from 20.3% to 12.2%, is real
+-- work; calling that "still failing" alongside a title nobody touched is both
+-- unhelpful and makes the tool look worse than it is. It is still not "delivery
+-- ready", and we do not claim it is.
 CREATE OR REPLACE VIEW deliverable.catalog_status AS
 SELECT
     title_id,
@@ -53,9 +61,12 @@ SELECT
     max(run_at)                                       AS last_run,
     countIf(passed = 0 AND stage = 'before')          AS failures_before,
     countIf(passed = 0 AND stage = 'after')           AS failures_after,
-    if(countIf(stage = 'after') = 0,
-       'not remediated',
-       if(countIf(passed = 0 AND stage = 'after') = 0, 'delivery ready', 'still failing')
+    multiIf(
+        countIf(stage = 'after') = 0,                             'not remediated',
+        countIf(passed = 0 AND stage = 'after') = 0,              'delivery ready',
+        countIf(passed = 0 AND stage = 'after')
+            < countIf(passed = 0 AND stage = 'before'),           'improved, needs human',
+        'still failing'
     )                                                 AS verdict
 FROM deliverable.findings
 WHERE (title_id, run_id) IN (
