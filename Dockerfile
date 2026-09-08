@@ -23,6 +23,7 @@ COPY . .
 # Pre-create /tmp dirs for ClickHouse (entrypoint also does this, belt & suspenders)
 RUN mkdir -p /tmp/clickhouse/{data,tmp,user_files,format_schemas,log}
 
-ENV PORT=8080 CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=8123
+ENV PORT=8080 CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=8123 \
+    MCP_TRANSCRIPT_PATH=/tmp/mcp_transcript.json
 EXPOSE 8080
 CMD ["bash", "docker-entrypoint.sh"]

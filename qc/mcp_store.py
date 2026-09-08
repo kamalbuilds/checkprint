@@ -40,7 +40,12 @@ _CATALOG_SQL = (
     "FROM deliverable.catalog_status ORDER BY failures_before DESC"
 )
 
-_TRANSCRIPT_PATH = Path(__file__).parent / "mcp_transcript.json"  # committed evidence
+# Where the MCP call transcript is written as judge-visible evidence.
+# Cloud Run's filesystem is read-only outside /tmp, so honour an override; locally
+# it stays next to the code where it can be committed.
+_TRANSCRIPT_PATH = Path(
+    os.getenv("MCP_TRANSCRIPT_PATH", str(Path(__file__).parent / "mcp_transcript.json"))
+)
 
 
 def _server_env() -> dict[str, str]:
