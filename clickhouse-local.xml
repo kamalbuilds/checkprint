@@ -1,10 +1,34 @@
-<!-- ClickHouse config for self-hosted mode inside Cloud Run.
-     Cloud Run's filesystem is read-only except /tmp, so everything goes there. -->
+<!-- ClickHouse OVERRIDE for self-hosted mode inside Cloud Run.
+
+     This is dropped into config.d/ by docker-entrypoint.sh so it LAYERS ON TOP of
+     the packaged /etc/clickhouse-server/config.xml. It must never be passed as
+     --config-file directly.
+
+     Why: passing this file as the whole config replaces the package's config,
+     which also drops the reference to users.xml. The server then aborts with
+     "Code: 180. DB::Exception: Settings profile `default` not found.
+     (THERE_IS_NO_PROFILE)" and never opens a port, so /api/health warms forever.
+     Verified on Cloud Run 2026-09-08 (job chdebug-8kmw5); layering instead makes
+     the server ready in ~2s (chdebug-ghfnb).
+
+     Cloud Run's filesystem is read-only except /tmp, so all paths go there. -->
 <clickhouse>
     <path>/tmp/clickhouse/data/</path>
     <tmp_path>/tmp/clickhouse/tmp/</tmp_path>
     <user_files_path>/tmp/clickhouse/user_files/</user_files_path>
     <format_schema_path>/tmp/clickhouse/format_schemas/</format_schema_path>
+
+    <!-- users.xml is copied to /tmp/chconf/ by the entrypoint; the packaged
+         path under /etc is fine to read, but access storage needs a writable
+         directory, which only /tmp provides. -->
+    <user_directories>
+        <users_xml>
+            <path>/tmp/chconf/users.xml</path>
+        </users_xml>
+        <local_directory>
+            <path>/tmp/clickhouse/access/</path>
+        </local_directory>
+    </user_directories>
 
     <logger>
         <log>/tmp/clickhouse/log/clickhouse-server.log</log>
@@ -16,37 +40,8 @@
     <http_port>8123</http_port>
     <tcp_port>9000</tcp_port>
 
-    <!-- Conservative memory for a 4 GiB container shared with Python -->
+    <!-- Conservative memory for a container shared with Python -->
     <mark_cache_size>134217728</mark_cache_size>
     <max_server_memory_usage_to_ram_ratio>0.5</max_server_memory_usage_to_ram_ratio>
     <max_concurrent_queries>20</max_concurrent_queries>
-
-    <!-- Users and profiles: required by APT-installed ClickHouse
-         (the static binary has these embedded, APT expects config files) -->
-    <profiles>
-        <default/>
-    </profiles>
-    <users>
-        <default>
-            <password></password>
-            <networks>
-                <ip>127.0.0.1</ip>
-            </networks>
-            <profile>default</profile>
-            <quota>default</quota>
-            <access_management>1</access_management>
-        </default>
-    </users>
-    <quotas>
-        <default>
-            <interval>
-                <duration>3600</duration>
-                <queries>0</queries>
-                <errors>0</errors>
-                <result_rows>0</result_rows>
-                <read_rows>0</read_rows>
-                <execution_time>0</execution_time>
-            </interval>
-        </default>
-    </quotas>
 </clickhouse>

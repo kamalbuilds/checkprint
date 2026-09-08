@@ -7,12 +7,24 @@ if [ "${CLICKHOUSE_HOST:-localhost}" = "localhost" ]; then
   echo "[entrypoint] will start local ClickHouse in background"
 
   # Cloud Run filesystem is read-only except /tmp
-  mkdir -p /tmp/clickhouse/{data,tmp,user_files,format_schemas,log}
+  mkdir -p /tmp/clickhouse/{data,tmp,user_files,format_schemas,log,access}
 
-  # Start ClickHouse with our /tmp-based config only (skip /etc/clickhouse-server/).
-  # --daemon fails inside Cloud Run (no pidfile path), so background with &.
-  clickhouse-server --config-file=/app/clickhouse-local.xml \
-    -- --path /tmp/clickhouse/data/ 2>&1 &
+  # Build a writable config tree that LAYERS our overrides on top of the
+  # packaged config, rather than replacing it.
+  #
+  # Passing clickhouse-local.xml directly as --config-file used to replace the
+  # package config entirely, which dropped its <user_directories> pointer to
+  # users.xml. ClickHouse then aborted at startup with:
+  #   Code: 180. DB::Exception: Settings profile `default` not found.
+  # and never opened port 9000, so /api/health warmed forever and the live URL
+  # was permanently 503. Verified on Cloud Run 2026-09-08.
+  mkdir -p /tmp/chconf/config.d
+  cp /etc/clickhouse-server/config.xml /tmp/chconf/config.xml
+  cp /etc/clickhouse-server/users.xml  /tmp/chconf/users.xml
+  cp -r /etc/clickhouse-server/users.d /tmp/chconf/users.d 2>/dev/null || true
+  cp /app/clickhouse-local.xml /tmp/chconf/config.d/zz-override.xml
+
+  clickhouse-server --config-file=/tmp/chconf/config.xml --daemon
 
   # Apply schema in a background subshell so uvicorn starts immediately
   (
