@@ -210,11 +210,35 @@ def loudness_profile(title_id: str):
             parameters={"t": title_id},
         ).result_rows
         cols = ["stage", "samples", "min", "p05", "median", "p95", "max", "sustained_range_lu"]
-        return {
+        out = {
             "title_id": title_id,
             "profile": [dict(zip(cols, r)) for r in rows],
             "computed_with": "quantileTDigest over deliverable.loudness_samples",
         }
+
+        # What that query actually cost, from ClickHouse's own query_log. Reported
+        # rather than asserted: a percentile over a 100ms sample stream should be
+        # cheap, and this is the number that shows whether it is.
+        try:
+            cost = ch.query(
+                """SELECT query_duration_ms, read_rows, formatReadableSize(read_bytes)
+                   FROM system.query_log
+                   WHERE type = 'QueryFinish' AND query LIKE '%worst_windows%'
+                     AND event_time > now() - INTERVAL 10 MINUTE
+                   ORDER BY event_time DESC LIMIT 1"""
+            ).result_rows
+            if cost:
+                out["query_cost"] = {
+                    "duration_ms": cost[0][0],
+                    "rows_read": cost[0][1],
+                    "bytes_read": cost[0][2],
+                    "source": "system.query_log",
+                }
+        except Exception:
+            # Cost reporting is a nicety. Never fail the endpoint over it.
+            pass
+
+        return out
     except Exception as exc:
         raise HTTPException(503, f"clickhouse unavailable: {str(exc)[:200]}")
 
