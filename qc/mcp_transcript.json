@@ -1,10 +1,10 @@
 [
   {
-    "ts": "2026-09-08T08:51:57.686045+00:00",
+    "ts": "2026-09-08T09:04:52.819575+00:00",
     "tool": "run_query",
     "args": {
       "query": "SELECT title_id, title, last_run, failures_before, failures_after, verdict FROM deliverable.catalog_status ORDER BY failures_before DESC"
     },
-    "result_preview": "{\"columns\": [\"title_id\", \"title\", \"last_run\", \"failures_before\", \"failures_after\", \"verdict\"], \"rows\": [[\"werewolf_in_a_girls_dormitory_ipod\", \"Werewolf in a Girls' Dormitory iPod version\", \"2026-09-08 12:59:16+05:30\", 5, 3, \"still failing\"], [\"what_becomes_of_the_children\", \"What Becomes Of The Children?\", \"2026-09-08 13:25:57+05:30\", 4, 3, \"still failing\"]]}"
+    "result_preview": "{\"columns\": [\"title_id\", \"title\", \"last_run\", \"failures_before\", \"failures_after\", \"verdict\"], \"rows\": [[\"werewolf_in_a_girls_dormitory_ipod\", \"Werewolf in a Girls' Dormitory iPod version\", \"2026-09-08 08:25:59\", 5, 3, \"still failing\"], [\"iron_mask\", \"The Iron Mask\", \"2026-09-08 08:33:18\", 3, 3, \"still failing\"], [\"what_becomes_of_the_children\", \"What Becomes Of The Children?\", \"2026-09-08 07:59:21\", 3, 3, \"still failing\"], [\"quevadis\", \"quevadis\", \"2026-09-08 08:29:27\", 2, 0, \"delivery ready\"]]}"
   }
 ]

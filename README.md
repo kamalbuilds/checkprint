@@ -163,13 +163,18 @@ export GOOGLE_API_KEY=...
 .venv/bin/python web/server.py   # http://localhost:8080
 ```
 
-Runs without model credentials too: `classify` falls back to a deterministic repair plan
-that is **labelled as such** in the output, never passed off as model reasoning.
+**Gemini credentials are required.** Without them `classify` raises `GeminiRequired`
+and the pipeline stops. There is deliberately no offline fallback: a fallback that
+produced the same plan shape would make the model decorative, since you could delete
+Gemini and the product would behave identically. Deciding *which* defects are worth
+repairing, in what order, and which need a human is the model's job. Executing the
+repair stays deterministic in ffmpeg, and the model is never allowed to produce a
+number that reaches a verdict.
 
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q     # 12 passed
+.venv/bin/python -m pytest tests/ -q     # 35 passed
 ```
 
 Every check is tested in **both directions**: it must go red on bad input and green on good
