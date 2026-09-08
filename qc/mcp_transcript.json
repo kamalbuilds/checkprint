@@ -1,6 +1,6 @@
 [
   {
-    "ts": "2026-09-08T08:50:30.181280+00:00",
+    "ts": "2026-09-08T08:51:57.686045+00:00",
     "tool": "run_query",
     "args": {
       "query": "SELECT title_id, title, last_run, failures_before, failures_after, verdict FROM deliverable.catalog_status ORDER BY failures_before DESC"

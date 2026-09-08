@@ -18,6 +18,20 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# The official mcp-clickhouse server goes in its OWN virtualenv, on purpose.
+#
+# google-adk pins mcp>=1.24,<2 (it imports mcp.shared.session), while
+# mcp-clickhouse pulls fastmcp>=4 which requires mcp>=2. Those cannot coexist in
+# one environment; pip resolves to ResolutionImpossible.
+#
+# They do not need to. MCP is a subprocess protocol: the server is launched over
+# stdio and speaks JSON-RPC, so it only has to exist as an executable, not as an
+# importable package in our interpreter. Isolating it keeps the server the real,
+# official one while our app keeps the mcp version ADK needs.
+RUN python -m venv /opt/mcp-clickhouse-venv && \
+    /opt/mcp-clickhouse-venv/bin/pip install --no-cache-dir "mcp-clickhouse>=0.6" && \
+    ln -s /opt/mcp-clickhouse-venv/bin/mcp-clickhouse /usr/local/bin/mcp-clickhouse
+
 COPY . .
 
 # Pre-create /tmp dirs for ClickHouse (entrypoint also does this, belt & suspenders)

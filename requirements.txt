@@ -1,8 +1,12 @@
 clickhouse-connect>=0.9
-mcp-clickhouse>=0.6
+# NOTE: mcp-clickhouse is deliberately NOT installed here. It is installed into
+# its own virtualenv in the Dockerfile and exposed on PATH as an executable.
+# Reason: google-adk requires mcp>=1.24,<2 while mcp-clickhouse pulls fastmcp>=4
+# which requires mcp>=2. MCP is a subprocess protocol, so the server only needs
+# to be runnable, not importable alongside our code. See the Dockerfile comment.
 google-genai>=1.0
 google-adk>=2.8            # ADK agent + McpToolset
-mcp<2                      # google-adk 2.8 needs mcp 1.x (mcp.shared.session)
+mcp>=1.24,<2               # google-adk 2.8 imports mcp.shared.session (gone in mcp 2.x)
 fastapi>=0.115
 uvicorn[standard]>=0.32
 pytest>=8.0
