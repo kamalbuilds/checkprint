@@ -27,6 +27,7 @@ import asyncio
 import json
 import os
 import shutil
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -56,19 +57,43 @@ def _server_env() -> dict[str, str]:
 
 
 def _find_server() -> str:
-    """Locate the mcp-clickhouse executable."""
-    # Check PATH first
+    """Locate the mcp-clickhouse executable.
+
+    Checked in order: this project's own virtualenv (where `pip install mcp-clickhouse`
+    puts it), then PATH, then the scratch probe venv, then ~/.local/bin. The venv is
+    checked first because running under `.venv/bin/python` does not put `.venv/bin` on
+    PATH, which is the common way this lookup silently fails.
+    """
+    here = Path(__file__).resolve()
+    repo = here.parent.parent
+
+    candidates = [
+        Path(sys.executable).parent / "mcp-clickhouse",   # the interpreter's own venv
+        repo / ".venv" / "bin" / "mcp-clickhouse",
+        repo.parent.parent / "scratch" / "mcp-probe" / ".venv" / "bin" / "mcp-clickhouse",
+        Path.home() / ".local" / "bin" / "mcp-clickhouse",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+
     found = shutil.which("mcp-clickhouse")
     if found:
         return found
-    # Check uv venv relative to this file (scratch layout)
-    for candidate in [
-        Path(__file__).parent.parent.parent / "scratch" / "mcp-probe" / ".venv" / "bin" / "mcp-clickhouse",
-        Path.home() / ".local" / "bin" / "mcp-clickhouse",
-    ]:
-        if candidate.exists():
-            return str(candidate)
-    return "mcp-clickhouse"  # fall through to PATH, let subprocess error be clear
+
+    # uvx can fetch and run the official server without a local install.
+    if shutil.which("uvx"):
+        return shutil.which("uvx")
+
+    return "mcp-clickhouse"  # let subprocess raise a clear error
+
+
+def _server_args() -> list[str]:
+    """uvx needs the package name; a direct executable needs nothing."""
+    cmd = _find_server()
+    if Path(cmd).name == "uvx":
+        return ["--from", "mcp-clickhouse", "mcp-clickhouse"]
+    return []
 
 
 async def _run_catalog_query() -> tuple[list[dict], list[dict]]:
@@ -76,7 +101,7 @@ async def _run_catalog_query() -> tuple[list[dict], list[dict]]:
 
     params = StdioServerParameters(
         command=_find_server(),
-        args=[],
+        args=_server_args(),
         env=_server_env(),
     )
 

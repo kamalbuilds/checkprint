@@ -239,6 +239,19 @@ def run_pipeline(identifier: str, workdir: Path, seconds: int = 300,
         fixed_subs, changed = m.remediate_subtitles(subs)
         (workdir / "fixed.srt").write_text(fixed_subs)
         deltas.append(f"{changed} cues retimed")
+
+    # A silent no-op here is the dangerous case: 'before' and 'after' come out
+    # byte-identical, verify reports "no change", and it looks like the film simply
+    # could not be improved. If there WERE auto-fixable failures and nothing ran, that
+    # is a planning bug and must be loud.
+    auto_fixable_failures = [f.check for f in before.failures if f.auto_fixable]
+    if auto_fixable_failures and not deltas:
+        raise RuntimeError(
+            "remediate produced no change despite auto-fixable failures "
+            f"{auto_fixable_failures}; planned actions were {sorted(actions)}. "
+            "Refusing to report an unchanged file as a completed repair."
+        )
+
     run.add(StepResult("remediate", bool(deltas), "; ".join(deltas) or "nothing auto-fixable",
                        {"actions": sorted(actions)}))
 
