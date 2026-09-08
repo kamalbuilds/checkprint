@@ -187,6 +187,27 @@ def mcp_transcript():
     return {"transcript": json.loads(path.read_text()), "path": str(path)}
 
 
+@app.get("/api/review/{title_id}")
+async def review(title_id: str):
+    """ADK supervisor agent review of one title against the whole catalog.
+
+    Unlike /api/catalog, which runs one fixed query, this hands ClickHouse to a
+    `google.adk` LlmAgent as an McpToolset and lets the model choose what to ask:
+    it starts with list_tables, learns the schema, compares the title to the
+    catalog baseline, and drills into the 100ms loudness samples only when the
+    numbers warrant it. The tool calls it chose are returned alongside the note,
+    so the reasoning can be checked against the queries behind it.
+    """
+    if not _ch_ready.is_set():
+        raise HTTPException(503, "ClickHouse is still starting up, try again shortly")
+    try:
+        from agent.supervisor import review_title
+
+        return await review_title(title_id)
+    except Exception as exc:
+        raise HTTPException(500, f"supervisor failed: {str(exc)[:300]}")
+
+
 @app.post("/api/run/{identifier}")
 def start_run(identifier: str, seconds: int = 180, max_bytes: int = 16_000_000):
     """Kick off a QC pass. Returns a job id to poll."""

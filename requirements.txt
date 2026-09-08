@@ -1,6 +1,8 @@
 clickhouse-connect>=0.9
 mcp-clickhouse>=0.6
 google-genai>=1.0
+google-adk>=2.8            # ADK agent + McpToolset
+mcp<2                      # google-adk 2.8 needs mcp 1.x (mcp.shared.session)
 fastapi>=0.115
 uvicorn[standard]>=0.32
 pytest>=8.0
