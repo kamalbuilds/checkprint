@@ -84,13 +84,78 @@
           <div><div class="lbl">AFTER</div><audio id="a-after" controls preload="none"></audio></div>
         </div>
       </div>
+
+      <div class="panel" style="margin-top:20px">
+        <h2>SUPERVISOR AGENT — THE QUERIES IT CHOSE</h2>
+        <div class="lbl" style="margin-bottom:10px">
+          A Google ADK <code>LlmAgent</code> holding the official <code>mcp-clickhouse</code>
+          MCP server as an <code>McpToolset</code>. Nothing below is written by us: the agent
+          discovers the schema, then decides what to ask.
+        </div>
+        <button id="review" disabled>Review this title against the catalog</button>
+        <div id="trace"></div>
+      </div>
     </div>
+  </div>
+
+  <div class="panel" style="margin-top:22px">
+    <h2>CATALOG — READ THROUGH mcp-clickhouse</h2>
+    <div id="catalog"><span class="empty">Loading…</span></div>
   </div>
 </main>
 
 <script>
 const STEPS = ["ingest","measure","classify","remediate","verify","report"];
 let selected = null, job = null;
+
+async function loadCatalog(){
+  const box = document.getElementById("catalog");
+  try{
+    const r = await fetch("/api/catalog").then(r=>r.json());
+    if(r.warming){ box.innerHTML = '<span class="empty">ClickHouse is starting…</span>';
+                   return setTimeout(loadCatalog, 4000); }
+    if(!r.catalog || !r.catalog.length){
+      box.innerHTML = '<span class="empty">No titles measured yet. Run a QC pass above.</span>';
+      return;
+    }
+    const rows = r.catalog.map(c=>`<tr>
+        <td>${c.title}</td>
+        <td class="num ${c.failures_before>0?'v-fail':'v-pass'}">${c.failures_before}</td>
+        <td class="arrow">→</td>
+        <td class="num ${c.failures_after>0?'v-fail':'v-pass'}">${c.failures_after}</td>
+        <td class="${c.verdict==='delivery ready'?'v-pass':'v-fail'}">${c.verdict}</td>
+      </tr>`).join("");
+    box.innerHTML = `<table>
+        <tr><th>TITLE</th><th>FAILURES BEFORE</th><th></th><th>AFTER</th><th>VERDICT</th></tr>
+        ${rows}</table>
+      <div class="lbl" style="margin-top:10px">
+        Read via <code>${r.via}</code> · <a href="/api/mcp-transcript" style="color:var(--accent)">see the raw MCP tool call</a>
+      </div>`;
+  }catch(e){ box.innerHTML = '<span class="empty">Catalog unavailable.</span>'; }
+}
+
+async function runReview(){
+  if(!selected) return;
+  const btn = document.getElementById("review");
+  const box = document.getElementById("trace");
+  btn.disabled = true;
+  box.innerHTML = '<div class="lbl" style="margin-top:12px">Agent working… it chooses its own queries, so this takes a few seconds.</div>';
+  try{
+    const r = await fetch("/api/review/"+selected.identifier).then(r=>r.json());
+    if(r.detail){ box.innerHTML = `<div class="note">${r.detail}</div>`; btn.disabled=false; return; }
+    const calls = (r.tool_calls||[]).map((t,i)=>
+      `<div class="repro" style="margin-top:6px">${i+1}. ${t.tool}
+${(t.args && (t.args.query || JSON.stringify(t.args))) || ""}</div>`).join("");
+    box.innerHTML = `
+      <div class="lbl" style="margin-top:12px">
+        ${(r.tool_calls||[]).length} MCP tool calls · framework ${r.framework} · model ${r.model}
+      </div>
+      ${calls}
+      ${r.note ? `<div class="note">${r.note.replace(/\n/g,"<br>")}</div>` : ""}`;
+  }catch(e){ box.innerHTML = `<div class="note">Review failed: ${e}</div>`; }
+  btn.disabled = false;
+}
+document.getElementById("review").onclick = runReview;
 
 async function loadTitles(){
   const r = await fetch("/api/titles?rows=8").then(r=>r.json());
@@ -105,6 +170,7 @@ async function loadTitles(){
       [...box.children].forEach(c=>c.classList.remove("sel"));
       d.classList.add("sel");
       document.getElementById("go").disabled = false;
+      document.getElementById("review").disabled = false;
       const s = document.getElementById("src");
       s.style.display = "block";
       s.textContent = "archive.org/download/" + t.identifier + "/" + t.video;
@@ -161,6 +227,7 @@ async function poll(){
     document.getElementById("a-before").src = "/api/audio/"+job+"/before";
     document.getElementById("a-after").src  = "/api/audio/"+job+"/after";
     document.getElementById("go").disabled = false;
+    loadCatalog();
     return;
   }
   if(run.state==="failed"){
@@ -182,6 +249,7 @@ document.getElementById("go").onclick = async ()=>{
 };
 
 loadTitles();
+loadCatalog();
 </script>
 </body>
 </html>
