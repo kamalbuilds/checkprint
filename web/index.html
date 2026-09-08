@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DELIVERABLE — delivery QC that repairs the master</title>
+<style>
+  :root{
+    --bg:#0b0c0e; --panel:#131519; --line:#23262d; --ink:#e8eaed;
+    --muted:#8b919b; --fail:#e5484d; --pass:#3dd68c; --accent:#e8b931;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.55 ui-sans-serif,-apple-system,"SF Pro Text",Inter,sans-serif}
+  header{border-bottom:1px solid var(--line);padding:22px 28px;display:flex;
+         align-items:baseline;gap:16px;flex-wrap:wrap}
+  h1{margin:0;font-size:17px;letter-spacing:.14em;font-weight:600}
+  .sub{color:var(--muted);font-size:13px}
+  main{max-width:1120px;margin:0 auto;padding:28px}
+  .row{display:grid;grid-template-columns:340px 1fr;gap:22px}
+  @media(max-width:860px){.row{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px}
+  h2{font-size:12px;letter-spacing:.12em;color:var(--muted);margin:0 0 14px;font-weight:600}
+  button{background:var(--ink);color:#0b0c0e;border:0;border-radius:7px;
+         padding:9px 15px;font-weight:600;font-size:14px;cursor:pointer}
+  button:disabled{opacity:.45;cursor:default}
+  .title-item{padding:10px 11px;border:1px solid var(--line);border-radius:7px;
+              margin-bottom:8px;cursor:pointer;font-size:13.5px}
+  .title-item:hover{border-color:var(--muted)}
+  .title-item.sel{border-color:var(--accent);background:#1a1a12}
+  .steps{display:flex;flex-direction:column;gap:9px;margin-bottom:20px}
+  .step{display:flex;gap:11px;align-items:flex-start;font-size:13.5px}
+  .dot{width:9px;height:9px;border-radius:50%;background:#2c313a;margin-top:6px;flex:none}
+  .dot.on{background:var(--pass)} .dot.warn{background:var(--accent)}
+  .step .name{width:88px;color:var(--muted);flex:none}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--muted);font-weight:500;padding:7px 8px;
+     border-bottom:1px solid var(--line);font-size:11.5px;letter-spacing:.07em}
+  td{padding:8px;border-bottom:1px solid #1b1e24;vertical-align:top}
+  .num{font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,monospace}
+  .v-fail{color:var(--fail);font-weight:600}
+  .v-pass{color:var(--pass);font-weight:600}
+  .arrow{color:var(--muted);padding:0 6px}
+  .note{background:#101218;border-left:2px solid var(--accent);padding:12px 14px;
+        border-radius:0 7px 7px 0;font-size:13.5px;margin-top:16px}
+  .repro{font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;
+         background:#0e1014;border:1px solid var(--line);border-radius:7px;
+         padding:11px 13px;color:#b6bcc6;overflow-x:auto;white-space:pre;margin-top:10px}
+  audio{width:100%;margin-top:8px;height:34px}
+  .ab{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px}
+  @media(max-width:640px){.ab{grid-template-columns:1fr}}
+  .lbl{font-size:11.5px;color:var(--muted);letter-spacing:.08em}
+  .empty{color:var(--muted);font-size:13.5px}
+</style>
+</head>
+<body>
+<header>
+  <h1>DELIVERABLE</h1>
+  <span class="sub">Delivery QC that repairs the master and re-measures to prove it. Gemini on Google Cloud + ClickHouse.</span>
+</header>
+
+<main>
+  <div class="row">
+    <div>
+      <div class="panel">
+        <h2>PUBLIC-DOMAIN TITLES</h2>
+        <div id="titles"><span class="empty">Loading from archive.org…</span></div>
+        <button id="go" disabled>Run delivery QC</button>
+        <div class="repro" id="src" style="display:none"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>AGENT PIPELINE</h2>
+        <div class="steps" id="steps"></div>
+        <div id="verdict"></div>
+      </div>
+
+      <div class="panel" style="margin-top:20px">
+        <h2>HEAR THE DEFECT</h2>
+        <div class="ab">
+          <div><div class="lbl">BEFORE</div><audio id="a-before" controls preload="none"></audio></div>
+          <div><div class="lbl">AFTER</div><audio id="a-after" controls preload="none"></audio></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const STEPS = ["ingest","measure","classify","remediate","verify","report"];
+let selected = null, job = null;
+
+async function loadTitles(){
+  const r = await fetch("/api/titles?rows=8").then(r=>r.json());
+  const box = document.getElementById("titles");
+  box.innerHTML = "";
+  r.titles.forEach(t=>{
+    const d = document.createElement("div");
+    d.className = "title-item";
+    d.textContent = t.title + (t.subtitle ? "  · subtitles" : "");
+    d.onclick = ()=>{
+      selected = t;
+      [...box.children].forEach(c=>c.classList.remove("sel"));
+      d.classList.add("sel");
+      document.getElementById("go").disabled = false;
+      const s = document.getElementById("src");
+      s.style.display = "block";
+      s.textContent = "archive.org/download/" + t.identifier + "/" + t.video;
+    };
+    box.appendChild(d);
+  });
+}
+
+function renderSteps(steps){
+  const box = document.getElementById("steps");
+  box.innerHTML = "";
+  STEPS.forEach(name=>{
+    const done = steps.find(s=>s.step===name);
+    const el = document.createElement("div");
+    el.className = "step";
+    el.innerHTML = `<div class="dot ${done ? (done.ok?'on':'warn') : ''}"></div>
+      <div class="name">${name}</div>
+      <div>${done ? done.summary : '<span class="empty">waiting</span>'}</div>`;
+    box.appendChild(el);
+  });
+}
+
+function renderVerdict(run){
+  const verify = (run.steps||[]).find(s=>s.step==="verify");
+  const report = (run.steps||[]).find(s=>s.step==="report");
+  const out = document.getElementById("verdict");
+  if(!verify){ out.innerHTML=""; return; }
+
+  const before = verify.data.before, after = verify.data.after;
+  const rows = before.map(b=>{
+    const a = after.find(x=>x.check===b.check) || b;
+    return `<tr>
+      <td>${b.check.replace(/_/g," ")}<br><span class="lbl">${b.spec}</span></td>
+      <td class="num ${b.passed?'v-pass':'v-fail'}">${b.measured ?? "-"} ${b.unit}</td>
+      <td class="arrow">→</td>
+      <td class="num ${a.passed?'v-pass':'v-fail'}">${a.measured ?? "-"} ${a.unit}</td>
+      <td class="${a.passed?'v-pass':'v-fail'}">${a.passed?"PASS":"FAIL"}</td>
+    </tr>`;
+  }).join("");
+
+  out.innerHTML = `<table>
+      <tr><th>CHECK</th><th>BEFORE</th><th></th><th>AFTER</th><th></th></tr>${rows}
+    </table>
+    ${report ? `<div class="note">${report.summary}</div>` : ""}
+    <div class="repro">Verify it yourself:
+ffmpeg -i "${selected ? selected.video : "source.mp4"}" -af ebur128 -f null -</div>`;
+}
+
+async function poll(){
+  const run = await fetch("/api/run/"+job).then(r=>r.json());
+  renderSteps(run.steps||[]);
+  if(run.state==="done"){
+    renderVerdict(run);
+    document.getElementById("a-before").src = "/api/audio/"+job+"/before";
+    document.getElementById("a-after").src  = "/api/audio/"+job+"/after";
+    document.getElementById("go").disabled = false;
+    return;
+  }
+  if(run.state==="failed"){
+    document.getElementById("verdict").innerHTML =
+      `<div class="note">Run failed: ${run.error}</div>`;
+    document.getElementById("go").disabled = false;
+    return;
+  }
+  setTimeout(poll, 2000);
+}
+
+document.getElementById("go").onclick = async ()=>{
+  if(!selected) return;
+  document.getElementById("go").disabled = true;
+  document.getElementById("verdict").innerHTML = "";
+  renderSteps([]);
+  job = (await fetch("/api/run/"+selected.identifier, {method:"POST"}).then(r=>r.json())).job;
+  poll();
+};
+
+loadTitles();
+</script>
+</body>
+</html>
