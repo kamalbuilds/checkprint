@@ -58,7 +58,7 @@ def test_mcp_path_is_used() -> None:
     transcript = json.loads(_TRANSCRIPT_PATH.read_text())
 
     # Rule 1: non-empty
-    assert len(transcript) > 0, "FAIL: transcript is empty — MCP server was never called"
+    assert len(transcript) > 0, "FAIL: transcript is empty, MCP server was never called"
 
     # Rule 2: at least one run_query
     run_query_calls = [t for t in transcript if t.get("tool") == "run_query"]
