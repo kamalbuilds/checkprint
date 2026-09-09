@@ -11,9 +11,9 @@ produced it.
 
 ## 2. Elevator pitch
 
-> Measures a delivery master against EBU R128, repairs it in ffmpeg, then measures the repair. One film went -16.8 to -23.0 LUFS in 63 seconds, and one command re-measures the first number.
+> Platform reject for loudness. Checkprint repairs and re-measures: one public film went -16.8 to -23.0 LUFS in 63 seconds. One ffmpeg command proves the first number.
 
-**187 characters**, against Devpost's 200 limit.
+**176 characters**, against Devpost's 200 limit.
 
 ---
 
@@ -21,17 +21,32 @@ produced it.
 
 ![The same loudness reading twice: once as an untaken measurement on day zero, once as the rejection eleven days below it](docs/img/00-eleven-day-round-trip.png)
 
-Read that diagram top to bottom, because the vertical axis is time. The same value,
--26.1 LUFS, appears on it twice. Once near the top as a dashed arrow that costs about
-forty seconds of CPU and is never taken, and once at the bottom in red, as the
-rejection. The tall empty band between them is the product. Nothing in it changes the
-file. That distance is the entire cost, and it is bought by not running one command.
-Its third card is explicit about which of its figures are sourced and which are the
-shape of a redelivery cycle drawn to scale rather than a cited filing.
+### The judge frame in one breath
 
-What follows is one file's case history. A real film, a real number, a real repair, and
-the same number measured again afterwards. Everything Checkprint does happens to this
-file in the next few hundred words, in order.
+| Slot | Checkprint owns |
+|---|---|
+| Incident | A master ships without a meter reading. Eleven days later the same loudness value comes back as a platform rejection, and the title sits out of catalogue for the redelivery cycle |
+| Named user | Maya, post supervisor at an indie distributor, closing one outbound master to a streamer spec today |
+| Named incumbent | Telestream Vantage, Venera Pulsar, Interra Baton: detect and report. They do not rewrite loudness, re-measure the repair, and refuse to call the run done without that second stage |
+| Measured number | *Werewolf in a Girls' Dormitory* first 120s: **-16.8 LUFS** to **-23.0 LUFS** in **63 seconds** (ClickHouse `run_at` 17:30:52 to 17:31:55) |
+| Honest limit | Loudness repair is closed and re-proved. Subtitle retiming is partial. Picture faults are measured, never auto-repaired. Over-long subtitle lines stay for a person. Nobody has run this on a paying delivery yet |
+
+Same ClickHouse track as Redslip, opposite verb. Redslip ranks a fleet and stops at the work order. Checkprint closes one file: measure, locate, repair, re-measure, audit.
+
+### The shape of the problem
+
+A delivery master leaves the bay. Eleven days later it comes back rejected on
+loudness. Maya already ran Telestream Vantage, Venera Pulsar, or Interra Baton.
+Those tools detect and report. They do not repair the master and re-measure the
+repair. Redslip answers which titles would fail today. Checkprint answers a
+different question on one file: did the repair land, and can a stranger reproduce
+the delta.
+
+The diagram above is that eleven-day gap drawn as time. The same value, -26.1 LUFS,
+appears twice: once as a forty-second measurement nobody took, once as the rejection.
+Everything below is one file's case history: *Werewolf in a Girls' Dormitory*, first
+120 seconds, **-16.8 LUFS** repaired to **-23.0 LUFS** in **63 seconds**. Honest
+limit up front: over-long subtitle lines are reported and never auto-rewritten.
 
 ![The delivered master at 00:00:10.2, its measured loudness, and the command that reproduces it](docs/img/01-werewolf-before-after.png)
 
@@ -126,11 +141,11 @@ curl -s https://deliverable-387894104564.us-central1.run.app/api/title/werewolf_
   | jq '.after[] | select(.check=="integrated_loudness_ebu_r128") | .measured'   # -23.0
 ```
 
-That pair is the whole product. Measuring a master is a solved problem and there are
-several good tools for it. The part that is not solved is the second measurement:
-running the meter over the file you just repaired, storing that reading beside the
-first one on the same sample grid, and refusing to call the run finished without it. A
-repair nobody re-measured is a claim, and a delivery operator cannot ship a claim.
+That pair is the whole product. Measuring a master is a solved problem (Vantage, Pulsar, Baton, and any
+catalog ledger that ranks failures). The part that is not solved is the second
+measurement: running the meter over the file you just repaired, storing that reading
+beside the first one on the same sample grid, and refusing to call the run finished
+without it. A repair nobody re-measured is a claim, and Maya cannot ship a claim.
 
 True peak moved with it, -1.0 dBTP to -7.9. The subtitle track went from 116 cues over
 the reading-speed limit to 84, and from 29 under minimum duration to 13, by extending
