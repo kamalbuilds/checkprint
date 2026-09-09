@@ -264,6 +264,37 @@ def loudness_profile(title_id: str):
         raise HTTPException(503, f"clickhouse unavailable: {str(exc)[:200]}")
 
 
+@app.get("/api/agents")
+def agents():
+    """The ADK workflow topology: which nodes hold a model and which are ffmpeg.
+
+    Static and ClickHouse-free on purpose, so the first paint can show the judge
+    what the agent graph is before any measurement has been read.
+    """
+    from agent import api
+
+    return api.topology()
+
+
+@app.get("/api/title/{title_id}")
+def title(title_id: str):
+    """Everything already known about one measured title, from ClickHouse only.
+
+    This is what makes the first screen land populated. It reads stored
+    measurements for a title that was scanned earlier, so a judge sees a real
+    master, its real numbers, its loudness trace and the command to reproduce
+    them without waiting for a 40 second pipeline pass to finish first.
+    """
+    if not _ch_ready.is_set():
+        raise HTTPException(503, "ClickHouse is still starting up, try again shortly")
+    try:
+        from agent import api
+
+        return api.title_payload(title_id)
+    except Exception as exc:
+        raise HTTPException(503, f"title unavailable: {str(exc)[:200]}")
+
+
 @app.get("/api/review/{title_id}")
 async def review(title_id: str):
     """ADK supervisor agent review of one title against the whole catalog.
@@ -296,7 +327,15 @@ def start_run(identifier: str, seconds: int = 180, max_bytes: int = 16_000_000):
 
     def _work():
         try:
-            run = run_pipeline(identifier, WORK / job, seconds=seconds, max_bytes=max_bytes)
+            # Publish each node as it lands. Without this nothing is stored until the
+            # whole pass finishes, so a judge polling /api/run/{job} gets an empty
+            # step list for the entire 40 seconds and watches a spinner.
+            run = run_pipeline(
+                identifier, WORK / job, seconds=seconds, max_bytes=max_bytes,
+                on_step=lambda steps: _save_job(
+                    job, {"state": "running", "identifier": identifier, "steps": steps}
+                ),
+            )
             _save_job(job, {"state": "done", "identifier": identifier, **run.as_dict()})
         except Exception as exc:  # surfaced to the UI, never swallowed
             _save_job(job, {"state": "failed", "identifier": identifier, "error": str(exc)[:400]})
@@ -311,6 +350,27 @@ def get_run(job: str):
     if payload is None:
         raise HTTPException(404, "no such job")
     return payload
+
+
+@app.get("/api/run-trace/{job}")
+def run_trace(job: str):
+    """Per-agent view of a finished run: what each agent asked, and what was refused.
+
+    Grouped rather than raw, because the useful question is not "what events
+    occurred" but "which agent chose which query". Refusals are carried separately:
+    a run that located nothing because the master is clean and a run that located
+    nothing because the guardrail blocked the query are opposite facts, and
+    collapsing them into one empty result is how a demo lies by omission.
+    """
+    payload = _load_job(job)
+    if payload is None:
+        raise HTTPException(404, "no such job")
+    try:
+        from agent import api
+
+        return api.agent_trace(payload)
+    except Exception as exc:
+        raise HTTPException(500, f"trace unavailable: {str(exc)[:200]}")
 
 
 @app.get("/api/audio/{job}/{stage}")
