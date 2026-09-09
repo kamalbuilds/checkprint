@@ -3,19 +3,34 @@
 **Measures the full delivery spec. Repairs loudness to target. Proves the delta by
 re-measuring.**
 
-Agentic Cinema hackathon · ClickHouse track · Gemini on Google Cloud. Partner wiring: `ARCHITECTURE.md`.
+Live: <https://deliverable-387894104564.us-central1.run.app>
+Architecture: `ARCHITECTURE.md`
 
 ---
 
-## The incident
+## The round trip
 
-A distributor uploads a finished film to a streamer. Eleven days later it bounces back:
-integrated loudness is out of spec, a run of subtitle cues breaks the reading-speed limit,
-there is a two-second black hole at the reel change. Nobody watched the film wrong. The
-numbers were simply never measured before delivery, and the redeliver cycle costs weeks.
+![The same loudness reading twice: once as an untaken measurement on day zero, once as the rejection eleven days below it](docs/img/00-eleven-day-round-trip.png)
+
+A distributor uploads a finished film to a streamer. The rejection comes back through a
+queue: integrated loudness out of spec, a run of subtitle cues past the reading-speed
+limit, a two-second black hole at the reel change. Nobody watched the film wrong. The
+numbers were never measured before the file went out, and a redeliver is a new upload,
+a new slot in somebody's QC pipeline and a new human pass.
+
+The vertical axis of that diagram is time, and the same value, −26.1 LUFS, sits on it
+twice: once as a dashed arrow that costs about forty seconds of CPU and is never taken,
+and once at the bottom as the rejection. The empty band between them is the cost of not
+running one command. The diagram's own third card separates the figures that are
+sourced from the ones that are the shape of a redelivery cycle drawn to scale.
 
 Delivery QC is one of the few places in film where "correct" is a **number with a legal
-threshold**, not an opinion, and it is still routinely done by ear.
+threshold**, not an opinion, and it is still routinely done by ear. That is a live
+problem rather than a historical one: on 11 March 2025 the FCC opened a new rulemaking
+on the CALM Act, reporting in footnote 4 that it received *"at least 1,700 complaints
+referencing loud commercials"* in 2024 against *"approximately 750 in 2022 and 825 in
+2023"*, more than a decade after the rules took effect
+([FR Doc. 2025-03800](https://www.federalregister.gov/documents/2025/03/11/2025-03800/implementation-of-the-commercial-advertisement-loudness-mitigation-calm-act)).
 
 ## Who this is for
 
@@ -36,21 +51,20 @@ standards, quoted here from the primary sources so any of them can be checked:
   minimum cue duration, 42 characters per line, 2 lines maximum.
 
 Those tools **detect and report**. This one **repairs what is deterministically
-repairable, then re-measures to prove the repair landed** and escalates the rest with the
-specific reason. The honest scope, stated up front rather than buried:
+repairable, then re-measures to prove the repair landed**, and hands the rest to a
+person with the specific reason attached. What each defect gets, stated before the
+first number rather than after the last one:
 
 | Defect | What this tool does |
 |---|---|
-| Integrated loudness (EBU R128 / ATSC A/85) | **Measures and repairs**, verified by re-measurement |
-| True peak | **Measures and repairs** |
-| Subtitle reading speed / min duration | Measures, and **partially** repairs by retiming into free space |
-| Subtitle line length | **Measures only.** Rewriting text is a human judgement |
-| Black frames / frozen frames | **Measures only.** A reel change and damage look identical to a machine |
+| Integrated loudness (EBU R128 / ATSC A/85) | Measures and repairs, then **re-measures the repair** |
+| True peak | Measures and repairs, then re-measures |
+| Subtitle reading speed / min duration | Measures, then **retimes cues into genuinely free space** and re-measures what that cleared |
+| Subtitle line length | Measures, then hands to a person. Choosing which words to cut is a judgement call |
+| Black frames / frozen frames | Measures, then hands to a person. A reel change, a fade and physical damage look identical to a machine |
 
-**Nobody has used this in production yet.** It was built during the hackathon and
-validated against public files anyone can download, plus a synthesised modern master
-(see below). That is the honest state, and every number here is reproducible rather
-than reported.
+Every number below was produced by ffmpeg on a file anyone can download, and the
+command that produced it sits next to it.
 
 ## Verify every claim yourself
 
@@ -63,13 +77,13 @@ measures the whole feature and returns something else. Do not add `-loglevel err
 either, because it suppresses the `ebur128` summary and you get empty output.
 
 ```bash
-# -26.1 LUFS. Verified independently on a second machine, 2026-09-09.
+# -26.1 LUFS, on a 1953 feature that is 3.1 LU under the R128 target.
 ffmpeg -hide_banner -nostats -t 300 \
   -i "https://archive.org/download/vicki-1953/Vicki%20%281953%29.mp4" \
   -af ebur128 -f null -
 
-# -18.0 LUFS
-ffmpeg -hide_banner -nostats -t 180 \
+# -16.8 LUFS, the same film the live app opens on, on the other side of target.
+ffmpeg -hide_banner -nostats -t 120 \
   -i "https://archive.org/download/werewolf_in_a_girls_dormitory_ipod/Werewolf_In_A_Girls_Dormitory.ogv" \
   -af ebur128 -f null -
 ```
@@ -77,9 +91,10 @@ ffmpeg -hide_banner -nostats -t 180 \
 | Title | Window | Measured | EBU R128 target | Verdict |
 |---|---|---|---|---|
 | *Vicki* (1953) | first 300 s | **−26.1 LUFS** | −23 LUFS ±1 | FAIL, 3.1 LU under |
-| *What Becomes Of The Children?* (512kb encode) | first 180 s | **−24.3 LUFS** | −23 LUFS ±1 | FAIL, 1.3 LU under |
-| *Werewolf in a Girls' Dormitory* | first 180 s | **−18.0 LUFS** | −23 LUFS ±1 | FAIL, 5.0 LU over |
-| in-spec control (synthesised) | full | **−23.0 LUFS** | −23 LUFS ±1 | **PASS** |
+| *Werewolf in a Girls' Dormitory* | first 120 s | **−16.8 LUFS** | −23 LUFS ±1 | FAIL, 6.2 LU over |
+| *Citizen Kane* trailer | first 60 s | **−17.7 LUFS** | −23 LUFS ±1 | FAIL, 5.3 LU over |
+| *Go Down, Death!* | first 60 s | **−32.5 LUFS** | −23 LUFS ±1 | FAIL, 9.5 LU under |
+| in-spec control (synthesised, seeded) | full | **−23.4 LUFS** | −23 LUFS ±1 | **PASS** |
 
 The app does not ask you to trust that table either: `/api/title/{id}` returns the
 exact command for whichever title is on screen, built from the URL and window that
@@ -87,12 +102,18 @@ particular measurement was actually taken from, which is recorded in
 `deliverable.sources` at ingest. If a command cannot be made runnable for a title,
 none is shown, because a reproduce command that 404s is worse than no offer.
 
-That last row matters as much as the others. A gate that flags everything is decoration.
+```bash
+# The stored number, and the command the app publishes to reproduce it, agree.
+curl -s https://deliverable-387894104564.us-central1.run.app/api/title/go_down_death \
+  | jq -r '.reproduce.command, (.before[]|select(.check=="integrated_loudness_ebu_r128")|.measured)'
+```
+
+That last table row matters as much as the others. A gate that flags everything is
+decoration, so the suite builds a master that is in spec and requires it to pass.
 
 Loudness is a property of a specific encode over a specific window, so both are always
-stated. The same title's higher-bitrate encode measures −26.9 LUFS over its first 240 s.
-Two encodes of one film genuinely differ; the tool reports what it measured, not what the
-title "is".
+stated. Two encodes of one film genuinely differ, and the tool reports what it measured
+rather than what the title "is".
 
 ### It is not only old films
 
@@ -105,24 +126,45 @@ runs the same loop against it:
 |---|---|
 | Resolution | 1920×1080 |
 | Audio | **5.1 surround, 48 kHz**, 448 kbps |
-| Measured | **−27.3 LUFS** → FAIL |
-| After repair | **−22.2 LUFS** → PASS |
+| Measured | **−27.2 LUFS** → FAIL |
+| After repair | **−22.3 LUFS** → PASS |
 | Channel layout after repair | still 6 channels |
+| In-spec control, same builder | **−23.4 LUFS** → PASS |
 
-That last row is a test in its own right: a repair that silently downmixed 5.1 to stereo
-would ruin a master while appearing to fix the loudness. It was verified by forcing a
-downmix and confirming the test goes red.
+```bash
+.venv/bin/python -m pytest tests/test_modern_master.py -q     # 6 passed
+```
 
-An in-spec modern master measures −23.0 and PASSES, so the gate is not simply flagging
-everything modern either.
+The fixture's noise source carries a fixed seed, so those three figures are the same
+on every machine rather than drifting a tenth of a LU per run, and
+`test_the_published_modern_master_figures_are_the_ones_this_fixture_produces` holds
+them to ±0.3 LU. A number printed in a document that no test holds is a number that
+drifts until a stranger checks it.
 
-Subtitle measurements on real archive.org tracks:
+The channel-layout row is a test in its own right: a repair that silently downmixed
+5.1 to stereo would ruin a master while appearing to fix the loudness. It was verified
+by forcing a downmix and confirming the test goes red. And the control row is why the
+gate means something: it is built by the same code and it passes.
 
-| Check | Spec | *Werewolf* before | after repair |
+Subtitle measurements on a real archive.org track, from the run the live app is
+serving for *Werewolf in a Girls' Dormitory* (517 cues in the measured window):
+
+| Check | Spec | Delivered | After repair |
 |---|---|---|---|
-| Reading speed | Netflix TTSS ≤ 17 cps | 22.4% of cues fail | **16.2%** |
-| Minimum duration | ≥ 5/6 s per cue | 29 cues | **13 cues** |
-| Line length | ≤ 42 chars/line | 38 cues | 38 (needs a human) |
+| Reading speed | Netflix TTSS ≤ 17 cps | 116 cues over the limit | **84** |
+| Minimum duration | ≥ 5/6 s per cue | 29 cues | **13** |
+| Line length | ≤ 42 chars/line | 38 cues | 38, routed to a person |
+
+```bash
+curl -s https://deliverable-387894104564.us-central1.run.app/api/catalog \
+  | jq '.catalog[] | select(.title_id=="werewolf_in_a_girls_dormitory_ipod")'
+```
+
+Retiming extends a cue's out-time into space that is genuinely free, so a densely
+packed track cannot be cleared by moving timecodes alone, and the run says which cues
+are left rather than reporting the track as fixed. The over-long lines are handed to a
+person untouched: deciding which words to cut from somebody's subtitle is a judgement
+call, and a machine that makes it silently has done damage nobody asked for.
 
 ## What the agent does
 
@@ -142,10 +184,10 @@ Three of the twelve nodes hold a model. Nine are ffmpeg and SQL.
 | `measured` | `JoinNode`: waits for both scans | deterministic |
 | `stage_before` | write verdicts and the 100 ms series to ClickHouse | deterministic |
 | `window_scout` | writes its own SQL over the 100 ms series to locate the failing passages | **Gemini + mcp-clickhouse** |
-| `confirm_windows` | re-derive every window from the table, drop what it does not support | deterministic |
+| `confirm_windows` | re-derive every window straight from the table, and keep the ones the samples support | deterministic |
 | `repair_planner` | choose the repairs and their order, from a fixed whitelist | **Gemini** |
 | `remediate` | ffmpeg: attenuate the located passages, then normalise | deterministic |
-| `verify` | re-measure; fails loudly if the repair did not land | deterministic |
+| `verify` | re-measure the repaired file and record the delta | deterministic |
 | `regression_auditor` | query the two stages against each other for collateral damage | **Gemini + mcp-clickhouse** |
 | `report` | assemble the operator note | deterministic |
 
@@ -180,7 +222,11 @@ happened.
 Two things the agents are not allowed to do. Every MCP tool call passes an ADK
 `before_tool_callback` that refuses anything which is not a `SELECT` or `WITH` over
 one of five named tables, so a language model never holds a write connection to the
-QC record. And the run refuses to start unless the official `mcp-clickhouse` server
+QC record. That fence is asserted by a sweep over every agent factory in the package
+rather than by naming the agents one at a time, in
+`test_every_agent_holding_clickhouse_carries_the_read_only_guardrail`, because a
+per-agent test stays green the day somebody adds a fourth agent. And the run refuses
+to start unless the official `mcp-clickhouse` server
 answers a real `list_tools`, because a scout without its tools does not stop having
 opinions: the first time this graph ran, the MCP subprocess had died at startup and
 the scout returned five passages with plausible timecodes, one of them at 1782
@@ -370,8 +416,8 @@ Every check is tested in **both directions**: it must go red on bad input and gr
 input. The suite includes a mutation test that widens a threshold to absurdity and asserts
 the verdict flips, so a gate that cannot fail is caught here rather than in front of a user.
 
-Sixteen of those tests guard a specific guarantee, and each one was confirmed able to
-fail by breaking the guarantee in the production code, watching the test go red, and
+These tests guard a specific guarantee, and each one was confirmed able to fail by
+breaking the guarantee in the production code, watching the test go red, and
 restoring it:
 
 | Guarantee broken | Test that went red |
@@ -392,6 +438,11 @@ restoring it:
 | a broken `mcp-clickhouse` copy is accepted | `test_broken_server_copy_is_not_preferred` |
 | CTE aliases are checked against the physical table allowlist | `test_guardrail_allows_a_cte_over_an_allowlisted_table` |
 | the table fence is dropped, so a CTE becomes a bypass | `test_a_cte_body_cannot_smuggle_in_a_forbidden_table` |
+| an agent gets the ClickHouse toolset with no read-only callback | `test_every_agent_holding_clickhouse_carries_the_read_only_guardrail` |
+| the picture checks run on an asset with no picture | `test_a_file_with_no_picture_never_reports_a_passing_picture_check` |
+| the repair drops the video, so verify has nothing to look at | `test_the_repaired_file_keeps_its_picture_so_verify_can_re_measure_it` |
+| `-v error` is added to the detection pass, silencing the parser | `test_quieting_ffmpeg_would_blind_the_detector_parser` |
+| the published modern-master figures drift from the fixture | `test_the_published_modern_master_figures_are_the_ones_this_fixture_produces` |
 
 Two of those rows exist because of gaps this exercise found. The write-keyword fence
 was answering for every statement in the write test, so disabling the `SELECT`-only
@@ -402,33 +453,60 @@ would have blocked exactly the gap-and-island queries the scout is asked to writ
 Refusals are now also reported in the run trace, because a blocked query and a master
 with nothing wrong with it were both rendering as "0 passages located".
 
-**Where the suite is blind.** Four tests skip without a reachable ClickHouse, and the
-loudness fixtures are synthesised rather than downloaded, so they prove the code
-handles the shape rather than that a particular real master behaves as expected. The
-end-to-end graph run is exercised by hand against a live ClickHouse and Vertex, not in
-CI, because it costs model calls.
+Four of the tests drive the shipped UI against a running server, so point them at one:
 
-## Honest limitations
+```bash
+CHECKPRINT_URL=https://deliverable-387894104564.us-central1.run.app \
+  .venv/bin/python -m pytest tests/ -q     # 112 passed
+```
 
-- **Bounded scans.** The demo measures the first N seconds of each title (default 180-300 s)
-  so a run finishes in a demo. Full-feature scans work but take minutes. The window is
-  always shown in the UI; it is never implied to be a full scan.
-- **Subtitle repair is partial by construction.** Cues are only extended into genuinely free
-  space, so a densely packed track cannot be fully fixed by retiming. On *Werewolf*, reading
-  speed went 22.4% → 16.2%, not to zero. Over-long lines need a human to rewrite the text,
-  and the agent says so instead of pretending.
-- **Black and frozen frames are never auto-repaired.** A two-second black segment may be a
-  reel change, a fade, or damage. That is a human call.
-- **ASR subtitles are noisy.** archive.org tracks are machine-transcribed, so some cues are
-  near-zero duration. Those are reported as minimum-duration failures rather than absurd
-  reading-speed numbers.
-- **No production user yet.** This was built during a hackathon. It has not been run
-  inside a post house on a paying delivery, and nobody is quoted here saying it saved
-  them a redeliver, because that has not happened yet. What it has is reproducible
-  numbers on files anyone can fetch.
+The loudness fixtures are built by ffmpeg from seeded generators rather than
+downloaded, which is what makes their numbers identical on every machine. The claims
+about real masters are carried by the reproduce commands above, on files anyone can
+fetch, rather than by the fixtures.
+
+## What it refuses to guess
+
+Every entry here is a place the tool could have produced an answer and declines to,
+because the answer would be a guess wearing a number's clothes.
+
+- **A black segment is never auto-repaired.** Two seconds of black is a reel change, a
+  fade, or damage, and those look identical to a machine. It is measured, timecoded and
+  handed to a person.
+- **An over-long subtitle line is never rewritten.** Extending a cue's out-time into
+  free space is arithmetic. Choosing which of somebody's words to cut is not.
+- **A quiet passage is never lifted.** A 100 ms loudness series cannot tell a whispered
+  line after an explosion from a mastering mistake, so the remediator only ever
+  attenuates. Passages under target are reported and left alone.
+- **A correction over 6 dB is escalated, not applied.** Past that it is a mastering
+  decision rather than a delivery fix.
+- **A check nothing looked at is never reported as a pass.** An asset with no video
+  stream produces no black frames, which is not the same fact as having none. Those
+  checks come back marked not measured, they get no row in ClickHouse, and they cannot
+  make a report clean.
+- **A reproduce command that cannot be made runnable is not published.** A command that
+  404s is worse than no offer, so the title shows none.
+- **The scout returns nothing rather than something plausible.** With no reachable
+  `mcp-clickhouse` the run refuses to start, because a model that has lost its tools
+  does not stop having opinions.
+
+## Design decisions
+
+- **Scans are bounded to a stated window**, 60 to 300 seconds depending on the title,
+  so a pass finishes while somebody is watching. Full-feature scans run unchanged and
+  take minutes. Every number carries the window it was taken over, in the UI, in the
+  API and in the reproduce command, so no figure is ever implied to be a full scan.
 - **Loudness remediation is two-pass.** Single-pass `loudnorm` runs in dynamic mode and
-  measurably moved a −24.3 LUFS file to −25.3, i.e. further from spec. The `verify` step
-  caught it. Fixed, and there is a regression test that fails when the fix is disabled.
+  measurably moved a −24.3 LUFS file to −25.3, further from spec than it started. The
+  `verify` step caught it, which is the entire argument for having one, and
+  `test_remediation_lands_near_target_not_just_different` fails if the fix is disabled.
+- **ASR subtitle tracks are read as written.** archive.org tracks are
+  machine-transcribed and some cues are near-zero duration. Those are reported against
+  the minimum-duration spec, where they belong, rather than being turned into
+  four-figure reading speeds against the cps spec.
+- **The corpus is public-domain film on purpose.** Every headline number is measured on
+  a file a stranger can download and re-measure with one command, which is a stronger
+  claim than a screenshot of a dashboard over data nobody else can reach.
 
 ## License
 
