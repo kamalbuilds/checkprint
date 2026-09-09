@@ -76,13 +76,13 @@ body{color:var(--ink);font:400 16px/1.35 var(--sans);letter-spacing:-0.16px;
 .rule-band{position:absolute;left:-360px;right:0;background:rgba(255,255,255,.055);z-index:4}
 .rule-label{position:absolute;right:56px;font:500 10px/1 var(--sans);
             text-transform:uppercase;letter-spacing:1.4px;color:var(--ink);
-            transform:translateY(50%);white-space:nowrap}
+            transform:translateY(50%) translateY(-11px);white-space:nowrap}
 .rule-tol{position:absolute;right:56px;font:400 10px/1 var(--mono);color:var(--slate);
           letter-spacing:0;white-space:nowrap}
 
 /* ---- the flying integrated readout ---- */
-.readout{position:absolute;right:150px;top:50%;transform:translateY(-50%);z-index:6;
-         text-align:right;transition:top .6s cubic-bezier(.2,.7,.2,1);max-width:60vw}
+.readout{position:absolute;right:196px;top:50%;transform:translateY(-50%);z-index:6;
+         text-align:right;transition:top .6s cubic-bezier(.2,.7,.2,1);max-width:56vw}
 .readout.hidden{display:none}
 .read-pair{display:flex;align-items:baseline;justify-content:flex-end;gap:16px;
            white-space:nowrap}
@@ -98,9 +98,9 @@ body{color:var(--ink);font:400 16px/1.35 var(--sans);letter-spacing:-0.16px;
 .read-delta.on{color:var(--ink)}
 
 /* the idle hint before any run, pointing at the primary */
-.meter-hint{position:absolute;right:150px;top:50%;transform:translateY(-50%);z-index:6;
+.meter-hint{position:absolute;right:196px;top:50%;transform:translateY(-50%);z-index:6;
             text-align:right;font:400 13px/1.5 var(--sans);color:var(--slate);
-            max-width:260px}
+            max-width:280px}
 .meter-hint b{color:var(--ink);font-weight:500}
 
 /* ---- pipeline log, printed on the still during a run ---- */
@@ -373,7 +373,7 @@ function positionRule(){
   const p = pct(TARGET), pLo = pct(TARGET - TOL), pHi = pct(TARGET + TOL);
   document.getElementById("rule").style.bottom = p + "%";
   document.getElementById("ruleLabel").style.bottom = p + "%";
-  document.getElementById("ruleTol").style.bottom = "calc(" + p + "% - 15px)";
+  document.getElementById("ruleTol").style.bottom = "calc(" + p + "% - 13px)";
   const band = document.getElementById("ruleBand");
   band.style.bottom = pLo + "%";
   band.style.height = (pHi - pLo) + "%";
