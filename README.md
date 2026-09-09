@@ -1,4 +1,4 @@
-# DELIVERABLE
+# Checkprint
 
 **Measures the full delivery spec. Repairs loudness to target. Proves the delta by
 re-measuring.**

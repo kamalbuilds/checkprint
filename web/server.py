@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from agent.pipeline import run_pipeline  # noqa: E402
 from qc import archive, store  # noqa: E402
 
-app = FastAPI(title="DELIVERABLE", version="1.0")
+app = FastAPI(title="Checkprint", version="1.0")
 
 WORK = Path("/tmp/deliverable-runs")
 WORK.mkdir(parents=True, exist_ok=True)

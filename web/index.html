@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DELIVERABLE: broadcast delivery QC</title>
+<title>Checkprint: hit -23</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -79,6 +79,8 @@ body{background:var(--canvas);color:var(--ink);
            color:var(--text-secondary);margin-top:2px}
 .lufs-spec{font:400 13px/1.3 var(--mono);color:var(--text-dim);margin-top:4px}
 .lufs-empty{font:400 14px/1.4 var(--sans);color:var(--text-muted);max-width:240px}
+.bay-mark{font:400 13px/1.2 var(--sans);color:var(--text-dim);letter-spacing:-0.16px;margin-bottom:20px}
+.bay-mark strong{color:var(--ink);font-weight:500}
 
 /* transport + primary action */
 .controls{display:flex;flex-direction:column;gap:8px}
@@ -134,6 +136,15 @@ tr:last-child td{border-bottom:0}
 .v-fail{color:var(--error)}
 .check-name{color:var(--ink);font-size:13px}
 .check-spec{color:var(--text-dim);font-size:11px;font-family:var(--mono)}
+/* the exact cues that failed a check */
+.cues td{padding-top:0;border-bottom:1px solid var(--border)}
+.cue-list{font-family:var(--mono);font-size:11px;line-height:1.7;margin:2px 0 4px}
+.cue-row{display:flex;gap:10px;color:var(--text-secondary)}
+.cue-id{color:var(--text-dim);min-width:52px}
+.cue-metric{min-width:64px}
+.cue-status{min-width:70px}
+.cue-text{color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cue-more{color:var(--text-dim)}
 
 /* loudness profile SVG */
 .profile-chart{margin-top:8px}
@@ -178,6 +189,7 @@ a:hover{color:var(--ink)}
 
   <!-- RIGHT: loudness meter bay -->
   <div class="hero-right">
+    <div class="bay-mark"><strong>Checkprint</strong> Hit -23</div>
     <div class="meter-wrap">
       <!-- meter scale -->
       <div style="position:relative;width:90px;flex:none">
@@ -190,7 +202,7 @@ a:hover{color:var(--ink)}
 
       <!-- LUFS readout -->
       <div class="lufs-readout" id="lufs-readout">
-        <div class="lufs-empty" id="lufs-empty">Select a title below, then measure and repair.</div>
+        <div class="lufs-empty" id="lufs-empty">Not measured yet. Run measure and repair on this master.</div>
         <div class="lufs-pair" id="lufs-pair" hidden>
           <span class="lufs-number" id="lufs-before"></span>
           <span class="lufs-arrow" id="lufs-arrow" hidden>&rarr;</span>
@@ -414,6 +426,31 @@ function renderPipeline(steps){
 }
 
 /* ── verdict / check sheet ── */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// The exact items that failed a check, before repair, each marked with whether
+// the repair actually cleared it. An empty "after" list means the check passed.
+function cueRows(b, a){
+  const beforeList = b.offenders || [];
+  if(!beforeList.length) return "";
+  const stillOver = new Set((a.offenders || []).map(o => o.cue));
+  const shown = beforeList.slice(0, 6);
+  const metric = o =>
+    o.cps !== undefined ? o.cps + " cps"
+    : o.duration !== undefined ? o.duration + "s"
+    : o.longest !== undefined ? o.longest + " ch"
+    : "";
+  const items = shown.map(o => `<div class="cue-row">
+      <span class="cue-id">cue ${o.cue}</span>
+      <span class="cue-metric v-fail">${esc(metric(o))}</span>
+      <span class="cue-status ${stillOver.has(o.cue)?'v-fail':'v-pass'}">${stillOver.has(o.cue)?"still over":"cleared"}</span>
+      <span class="cue-text">${esc(o.text || "")}</span>
+    </div>`).join("");
+  const more = beforeList.length > shown.length
+    ? `<div class="cue-row cue-more">+ ${beforeList.length - shown.length} more</div>` : "";
+  return `<tr class="cues"><td colspan="4"><div class="cue-list">${items}${more}</div></td></tr>`;
+}
+
 function renderVerdict(run){
   const verify = (run.steps||[]).find(s=>s.step==="verify");
   const report = (run.steps||[]).find(s=>s.step==="report");
@@ -441,7 +478,7 @@ function renderVerdict(run){
       <td class="num ${b.passed?'v-pass':'v-fail'}">${b.measured ?? "--"} ${b.unit}</td>
       <td class="num ${a.passed?'v-pass':'v-fail'}">${a.measured ?? "--"} ${a.unit}</td>
       <td class="${a.passed?'v-pass':'v-fail'}">${a.passed?"pass":"fail"}</td>
-    </tr>`;
+    </tr>${cueRows(b, a)}`;
   }).join("");
 
   const cs = document.getElementById("checksheet");

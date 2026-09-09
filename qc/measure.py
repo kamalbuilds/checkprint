@@ -58,6 +58,9 @@ class Finding:
     passed: bool
     detail: str = ""
     auto_fixable: bool = False
+    # The specific items that failed, e.g. per-cue reading-speed offenders.
+    # Empty means nothing failed this check.
+    offenders: list[dict] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -350,6 +353,7 @@ def subtitle_findings(measured: dict) -> list[Finding]:
             passed=over == 0,
             detail=f"{over} of {measured['cue_count']} cues exceed the reading-speed limit",
             auto_fixable=True,
+            offenders=measured["over_reading_speed"],
         ),
         Finding(
             check="subtitle_min_duration",
@@ -360,6 +364,7 @@ def subtitle_findings(measured: dict) -> list[Finding]:
             passed=not measured["under_min_duration"],
             detail=f"{len(measured['under_min_duration'])} cues below minimum duration",
             auto_fixable=True,
+            offenders=measured["under_min_duration"],
         ),
         Finding(
             check="subtitle_line_length",
@@ -370,6 +375,7 @@ def subtitle_findings(measured: dict) -> list[Finding]:
             passed=not measured["over_line_length"],
             detail=f"{len(measured['over_line_length'])} cues with an over-long line",
             auto_fixable=False,
+            offenders=measured["over_line_length"],
         ),
     ]
 

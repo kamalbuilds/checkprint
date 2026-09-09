@@ -212,3 +212,24 @@ def test_remediation_lands_near_target_not_just_different(tmp_path):
         f"remediation moved away from target: {before} -> {after}"
     )
     assert abs(after - (-23.0)) <= 1.0, f"remediation did not land in spec: {after}"
+
+
+def test_reading_speed_finding_names_the_failing_cues_and_shrinks_after_repair():
+    """The check sheet must show which cues failed, not only a percentage."""
+    srt = (
+        "1\n00:00:01,000 --> 00:00:02,000\n"
+        "This single cue crams far too many characters into one short second.\n\n"
+        "2\n00:00:03,000 --> 00:00:09,000\nShort and calm.\n\n"
+        "3\n00:00:10,000 --> 00:00:11,000\n"
+        "Another dense line no human reader could finish inside this window.\n"
+    )
+    before = m.subtitle_findings(m.measure_subtitles(srt))[0]
+    assert [o["cue"] for o in before.offenders] == [1, 3]
+    assert before.offenders[0]["cps"] > m.NETFLIX_MAX_CPS
+    assert before.offenders[0]["text"]
+
+    fixed, _ = m.remediate_subtitles(srt)
+    after = m.subtitle_findings(m.measure_subtitles(fixed))[0]
+    # Cue 3 has room to extend and is cleared; cue 1 is boxed in and stays over.
+    assert len(after.offenders) < len(before.offenders)
+    assert [o["cue"] for o in after.offenders] == [1]
