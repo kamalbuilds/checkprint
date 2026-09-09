@@ -126,6 +126,9 @@ body{color:var(--ink);font:400 16px/1.35 var(--sans);letter-spacing:-0.16px;
 .tbtn:hover:not(:disabled){color:var(--ink);border-color:var(--slate)}
 .tbtn:disabled{opacity:.34;cursor:default}
 .tbtn .ic{width:8px;height:8px;flex:none}
+.tbtn .ic.stop{display:none}
+.tbtn.playing .ic.play{display:none}
+.tbtn.playing .ic.stop{display:inline-block}
 .tbtn.playing{color:var(--ink);border-color:var(--ink)}
 .primary{appearance:none;border:1px solid var(--ink);background:var(--ink);
          color:var(--canvas);border-radius:2px;padding:13px 22px;cursor:pointer;
@@ -283,13 +286,15 @@ a:hover{color:var(--ink)}
   <!-- controls + current title -->
   <div class="deck">
     <div class="transport">
-      <button class="tbtn" id="playBefore" disabled>
-        <svg class="ic" viewBox="0 0 8 8" fill="currentColor"><path d="M0 0l8 4-8 4z"/></svg>
-        illegal master
+      <button class="tbtn" id="playBefore" data-label="play the illegal master" disabled>
+        <svg class="ic play" viewBox="0 0 8 8" fill="currentColor"><path d="M0 0l8 4-8 4z"/></svg>
+        <svg class="ic stop" viewBox="0 0 8 8" fill="currentColor"><rect width="8" height="8"/></svg>
+        <span class="tlabel">play the illegal master</span>
       </button>
-      <button class="tbtn" id="playAfter" disabled>
-        <svg class="ic" viewBox="0 0 8 8" fill="currentColor"><path d="M0 0l8 4-8 4z"/></svg>
-        repaired master
+      <button class="tbtn" id="playAfter" data-label="play the repaired master" disabled>
+        <svg class="ic play" viewBox="0 0 8 8" fill="currentColor"><path d="M0 0l8 4-8 4z"/></svg>
+        <svg class="ic stop" viewBox="0 0 8 8" fill="currentColor"><rect width="8" height="8"/></svg>
+        <span class="tlabel">play the repaired master</span>
       </button>
     </div>
     <button class="primary" id="go" disabled>Measure and repair</button>
@@ -658,23 +663,30 @@ async function runReview(){
 document.getElementById("review").onclick = runReview;
 
 /* ---------- transports ---------- */
+/* The label carries the state: idle reads "play the illegal master", playing reads
+   "stop" with a stop glyph, so the control says what it is doing, not just which
+   master it drives. */
 let playing = null;
+function setTransport(btn, isPlaying){
+  btn.classList.toggle("playing", isPlaying);
+  btn.querySelector(".tlabel").textContent = isPlaying ? "stop" : btn.dataset.label;
+}
 function stopAll(){
   aBefore.pause(); aAfter.pause(); playing = null;
-  document.getElementById("playBefore").classList.remove("playing");
-  document.getElementById("playAfter").classList.remove("playing");
+  setTransport(document.getElementById("playBefore"), false);
+  setTransport(document.getElementById("playAfter"), false);
 }
 aBefore.onended = stopAll;
 aAfter.onended = stopAll;
 document.getElementById("playBefore").onclick = ()=>{
   if(playing === "before"){ stopAll(); return; }
   stopAll(); aBefore.play(); playing = "before";
-  document.getElementById("playBefore").classList.add("playing");
+  setTransport(document.getElementById("playBefore"), true);
 };
 document.getElementById("playAfter").onclick = ()=>{
   if(playing === "after"){ stopAll(); return; }
   stopAll(); aAfter.play(); playing = "after";
-  document.getElementById("playAfter").classList.add("playing");
+  setTransport(document.getElementById("playAfter"), true);
 };
 
 /* ---------- run + poll ---------- */
