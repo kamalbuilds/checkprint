@@ -134,6 +134,66 @@ FROM deliverable.loudness_samples
 WHERE short_term > -70
 GROUP BY title_id, stage;
 
+-- Where each measurement came from. One row per ingest.
+--
+-- This exists so the reproduce command on screen is the URL that actually produced
+-- the number, rather than a URL rebuilt later from an identifier. Rebuilding it is
+-- how you publish `archive.org/download/Cherchever1/` with no filename on it,
+-- which 404s, and a broken reproduce command on a product whose whole pitch is
+-- "check my numbers yourself" is worse than no command at all.
+--
+-- `window_seconds` is stored next to the URL for the same reason: the published
+-- number is a measurement of the first N seconds, and a command without `-t N`
+-- measures the whole feature and returns something else.
+CREATE TABLE IF NOT EXISTS deliverable.sources
+(
+    title_id       String,
+    title          String,
+    ingested_at    DateTime DEFAULT now(),
+    video_file     String,
+    source_url     String,
+    window_seconds UInt32,
+    bytes_fetched  UInt64
+)
+ENGINE = ReplacingMergeTree(ingested_at)
+ORDER BY title_id;
+
+-- Fail windows: the passages of a master that a window-scout agent located by
+-- writing its own SQL over loudness_samples, and the only regions the windowed
+-- remediation pass is allowed to touch.
+--
+-- This table is the reason the 100ms series is not an audit log. A finding says
+-- "integrated loudness is 4.3 LU under target", which a single global gain can
+-- answer. A window says "between 41.2s and 68.9s the short-term loudness sits at
+-- -31.4 LUFS", which a global gain cannot answer, because a global gain moves that
+-- passage and every other passage by the same amount and leaves the spread between
+-- them identical. Locating those passages is a window query over tens of thousands
+-- of rows per title, which is what a column store is for.
+--
+-- `sql` is the exact statement the agent sent to mcp-clickhouse. It is stored so
+-- the claim "the model chose this query" is inspectable rather than asserted, and
+-- so a reviewer can re-run it.
+CREATE TABLE IF NOT EXISTS deliverable.fail_windows
+(
+    run_id      UUID,
+    title_id    String,
+    title       String,
+    found_at    DateTime DEFAULT now(),
+    ord         UInt16,
+    start_s     Float32,
+    end_s       Float32,
+    metric      LowCardinality(String),   -- 'short_term_low' | 'short_term_high' | 'true_peak'
+    measured    Float64,
+    target      Float64,
+    unit        LowCardinality(String),
+    gain_db     Float32,                  -- what the remediator applied, 0 if refused
+    treated     UInt8,                    -- 0 when escalated to a human instead
+    reason      String,
+    sql         String
+)
+ENGINE = MergeTree
+ORDER BY (title_id, run_id, start_s);
+
 -- Pipeline run state. Lives in ClickHouse rather than process memory because
 -- Cloud Run serves requests from multiple instances: a job started on instance A
 -- was invisible to the poll that landed on instance B, which returned 404.

@@ -1,6 +1,7 @@
 # WORK ORDER: rebuild Checkprint so it is a loudness bay, not a dark dashboard
 
-You are Claude Opus. Effort high. Visual judgment is the job. Do not add a chip, a copy button, or a catalog column. Rebuild the first viewport.
+You are Claude Opus. Effort high. Visual judgment is the job. 
+Do not add a chip, a copy button, or a catalog column. Rebuild the first viewport.
 
 Wordmark **Checkprint**. You are in `projects/deliverable`. Rewrite `web/index.html` (HTML/CSS/JS in that file). Keep every existing API. Do not introduce Next.js, Tailwind, or Inter.
 

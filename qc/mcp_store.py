@@ -62,42 +62,19 @@ def _server_env() -> dict[str, str]:
 
 
 def _find_server() -> str:
-    """Locate the mcp-clickhouse executable.
+    """Locate a mcp-clickhouse executable that actually runs.
 
-    Checked in order: this project's own virtualenv (where `pip install mcp-clickhouse`
-    puts it), then PATH, then the scratch probe venv, then ~/.local/bin. The venv is
-    checked first because running under `.venv/bin/python` does not put `.venv/bin` on
-    PATH, which is the common way this lookup silently fails.
+    One resolver for the whole project, in `agent/agents.py`, because a lookup that
+    merely checks the file exists will happily prefer a copy that dies at import,
+    and the resulting MCP error is "Connection closed", which reads as a network
+    fault. See `agent.agents.resolve_server` for why that happens.
     """
-    here = Path(__file__).resolve()
-    repo = here.parent.parent
+    from agent.agents import resolve_server
 
-    candidates = [
-        Path(sys.executable).parent / "mcp-clickhouse",   # the interpreter's own venv
-        repo / ".venv" / "bin" / "mcp-clickhouse",
-        repo.parent.parent / "scratch" / "mcp-probe" / ".venv" / "bin" / "mcp-clickhouse",
-        Path.home() / ".local" / "bin" / "mcp-clickhouse",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
-
-    found = shutil.which("mcp-clickhouse")
-    if found:
-        return found
-
-    # uvx can fetch and run the official server without a local install.
-    if shutil.which("uvx"):
-        return shutil.which("uvx")
-
-    return "mcp-clickhouse"  # let subprocess raise a clear error
+    return str(resolve_server())
 
 
 def _server_args() -> list[str]:
-    """uvx needs the package name; a direct executable needs nothing."""
-    cmd = _find_server()
-    if Path(cmd).name == "uvx":
-        return ["--from", "mcp-clickhouse", "mcp-clickhouse"]
     return []
 
 

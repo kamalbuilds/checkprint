@@ -37,7 +37,11 @@ COPY . .
 # Pre-create /tmp dirs for ClickHouse (entrypoint also does this, belt & suspenders)
 RUN mkdir -p /tmp/clickhouse/{data,tmp,user_files,format_schemas,log}
 
+# Name the server explicitly rather than letting the resolver hunt for it. The
+# lookup works either way, but it probes each candidate by importing it, and there
+# is no reason to pay that on every run when the path is known at build time.
 ENV PORT=8080 CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=8123 \
-    MCP_TRANSCRIPT_PATH=/tmp/mcp_transcript.json
+    MCP_TRANSCRIPT_PATH=/tmp/mcp_transcript.json \
+    MCP_CLICKHOUSE_BIN=/opt/mcp-clickhouse-venv/bin/mcp-clickhouse
 EXPOSE 8080
 CMD ["bash", "docker-entrypoint.sh"]
