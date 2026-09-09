@@ -21,7 +21,7 @@ Turn 2, after being corrected hard, is the useful one and it changed the build.
 
 | Grok said | Verdict | Why |
 |---|---|---|
-| The MCP agent is "a guided tour of tables the app already owns"; `list_tables` then a lookup on views you built for the UI is the ClickHouse workshop script | **Real, taken.** | The window scout now writes gap-and-island SQL over the 100 ms series that no REST handler implements. Recorded verbatim in `fail_windows.sql`. |
+| The MCP agent is "a guided tour of tables the app already owns"; `list_tables` then a lookup on views you built for the UI is the ClickHouse workshop script | **Real, taken.** | The window scout now writes gap-and-island SQL over the 100 ms series that no REST handler implements. Recorded verbatim in the `sql` column of the `deliverable.fail_windows` table. |
 | The 100 ms series is written by Python and read by Python, so the agent never touches it and the table is ballast | **Real, taken.** | The scout and the auditor both query `loudness_samples` directly and their output changes the repair and the verdict. |
 | The one feature that wins: MCP-sourced fail windows become the only regions the remediator may touch, and the same windows are bands on the timeline | **Real, taken.** | This is the whole `window_scout` to `confirm_windows` to `remediate` path. |
 | A cosmetic ADK wrapper around `run_pipeline` looks worse than no ADK | **Real, taken.** | The graph is not a wrapper: measurement, remediation and re-measurement are function nodes, and only three nodes hold a model. |
