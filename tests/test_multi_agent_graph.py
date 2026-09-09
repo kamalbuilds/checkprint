@@ -93,6 +93,128 @@ def test_scans_fan_out_and_are_joined():
     assert join._requires_all_predecessors is True
 
 
+# --- /api/agents may not claim a change this corpus cannot show ------------
+
+# `removing_it` is served to anyone who opens /api/agents, so every sentence in it
+# is a claim a judge can go and test. "The output file changes" is only true where a
+# passage collides with the lift to target, and no public-domain transfer in this
+# catalog does that: the scout returns no windows on all of them, so the repair is
+# already one global gain and deleting the scout leaves the delivered file identical.
+# The shipped string therefore has to carry its own scope, and this is the check that
+# it does. It also fails the other way: if the corpus ever grows a title with a
+# treated window, the disclaimer becomes the stale sentence and has to go.
+
+_CLAIMS_A_DIFFERENT_FILE = _re.compile(
+    r"(?:output|delivered|rendered|repaired|resulting)\s+file[^.]{0,80}?"
+    r"(?:changes|change|differs|differ|is different)"
+    r"|byte[ -]different",
+    _re.I,
+)
+_NAMES_THE_COLLIDING_CASE = _re.compile(
+    r"\bwould\b[^.]{0,80}?(?:clip|no headroom)", _re.I)
+_DISCLAIMS_THIS_CORPUS = _re.compile(
+    r"no title in (?:this|the)[^.]{0,40}?corpus", _re.I)
+_NO_WINDOWS_HERE = _re.compile(r"(?:returns no windows|no windows)", _re.I)
+
+
+def _audit_removal_claims(agents: list[dict], treated_windows: int) -> None:
+    """Raise unless every file-change claim matches what the corpus can demonstrate."""
+    for agent in agents:
+        text = agent["removing_it"]
+        if not _CLAIMS_A_DIFFERENT_FILE.search(text):
+            continue
+        assert _NAMES_THE_COLLIDING_CASE.search(text), (
+            f"{agent['name']}: removing_it says the file changes without naming the "
+            f"case where it does, a passage that would clip once the programme is "
+            f"lifted to target. As written it reads as a claim about every title. "
+            f"Text: {text!r}"
+        )
+        if treated_windows == 0:
+            assert _DISCLAIMS_THIS_CORPUS.search(text), (
+                f"{agent['name']}: no treated window is stored for any title, so on "
+                f"this corpus the repair is one global gain and removing the scout "
+                f"changes nothing. removing_it must say so. Text: {text!r}"
+            )
+            assert _NO_WINDOWS_HERE.search(text) and "identical" in text.lower(), (
+                f"{agent['name']}: the disclaimer has to state the consequence, that "
+                f"the scout returns no windows here and the delivered file is "
+                f"identical without it. Text: {text!r}"
+            )
+        else:
+            assert not _DISCLAIMS_THIS_CORPUS.search(text), (
+                f"{agent['name']}: {treated_windows} treated window(s) are stored, so "
+                f"a title in the corpus now does demonstrate the change and the "
+                f"no-collision disclaimer is false. Name that title instead. "
+                f"Text: {text!r}"
+            )
+
+
+def _treated_windows_in_the_corpus() -> int:
+    """Passages the remediator actually applied a gain to, over the whole store.
+
+    A window row with treated = 0 is the scout locating a passage and the remediator
+    declining it, which leaves the render untouched, so only treated rows can back a
+    claim that the output differs.
+
+    Blind spot, stated rather than hidden: with no reachable ClickHouse this returns
+    0, which selects the strict branch above. That still catches the sentence losing
+    its scope, which is the failure we shipped; it cannot catch a disclaimer that a
+    newly ingested title has made stale.
+    """
+    try:
+        rows = store.client().query(
+            "SELECT count() FROM deliverable.fail_windows WHERE treated"
+        ).result_rows
+    except Exception:
+        return 0
+    return int(rows[0][0]) if rows else 0
+
+
+def test_no_removal_claim_promises_a_file_change_this_corpus_cannot_show():
+    treated = _treated_windows_in_the_corpus()
+    _audit_removal_claims(api.topology()["agents"], treated)
+
+
+def test_the_removal_claim_audit_goes_red_on_both_kinds_of_overclaim():
+    """The audit above is worth nothing unless it can fail. Both branches, in-suite."""
+    shipped_before_the_fix = [{
+        "name": "window_scout",
+        "removing_it": "the repair becomes one gain over the whole programme, "
+                       "so the output file changes",
+    }]
+    with pytest.raises(AssertionError, match="without naming the case"):
+        _audit_removal_claims(shipped_before_the_fix, 0)
+
+    scoped_but_not_disclaimed = [{
+        "name": "window_scout",
+        "removing_it": "on a master where a passage would clip once the programme is "
+                       "lifted to target, the rendered file differs",
+    }]
+    with pytest.raises(AssertionError, match="must say so"):
+        _audit_removal_claims(scoped_but_not_disclaimed, 0)
+
+    # And the reverse: once a title in the store carries a treated window, the
+    # no-collision disclaimer is the stale half of the sentence. A literal is used
+    # here so this test names one direction; the shipped string is put through the
+    # same branch by the corpus test above, with the count read from ClickHouse.
+    fully_scoped = [{
+        "name": "window_scout",
+        "removing_it": "on a master where a passage would clip once the programme is "
+                       "lifted to target, the rendered file differs. No title in this "
+                       "public-domain corpus has that collision, so the scout returns "
+                       "no windows here and the file is identical without it",
+    }]
+    _audit_removal_claims(fully_scoped, 0)
+    with pytest.raises(AssertionError, match="disclaimer is false"):
+        _audit_removal_claims(fully_scoped, treated_windows=1)
+
+    # The strings that make no claim about the file are not dragged in by the regex.
+    quiet = [a for a in api.topology()["agents"] if a["name"] != "window_scout"]
+    assert len(quiet) == 2
+    _audit_removal_claims(quiet, 0)
+    _audit_removal_claims(quiet, 1)
+
+
 # --- removal proof 1: the window scout changes the audio ------------------
 
 

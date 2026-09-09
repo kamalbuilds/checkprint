@@ -30,7 +30,7 @@ Deviation from research: YES, twice. The adversarial critique said the winning m
 | Caption defects are real | 110 of 447 cues (24.6%) over 17 cps | ran on a real .srt |
 | The located passage moves by exactly the planned gain | -3.0 dB inside 15.0s-16.0s, 0.0 dB elsewhere within 0.1 LU | ran ffmpeg over the 100ms series, 2026-09-09 |
 | The scout's windows change the output file | byte-different render against the same repair with no windows | ran the remediator twice, 2026-09-09 |
-| The scout writes non-trivial SQL itself | gap-and-island grouping with `ROW_NUMBER() OVER`, recorded in `fail_windows.sql` | live graph run on vicki-1953, 2026-09-09 |
+| The scout writes non-trivial SQL itself | gap-and-island grouping with `ROW_NUMBER() OVER`, recorded in the `sql` column of the `deliverable.fail_windows` table | live graph run on vicki-1953, 2026-09-09 |
 | The graph runs end to end on real titles | haider-2014: 6 failing checks to 4, 231 samples written, 10 MCP tool calls | live graph run, 2026-09-09 |
 | Judge can reproduce any of it | `ffmpeg -hide_banner -nostats -t 300 -i "<url>" -af ebur128 -f null -` gives -26.1 LUFS | one command, public file, independently confirmed on a second machine |
 

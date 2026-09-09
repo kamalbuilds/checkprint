@@ -233,9 +233,10 @@ against the raw ceiling, returned a passage peaking at −14.6 dBTP, and the rem
 refused it as already compliant. It was right to refuse.
 
 Here is the query Gemini wrote for *Vicki* (1953), unedited, sent through
-`mcp-clickhouse` and recorded in `fail_windows.sql`. Nobody wrote this SQL by hand,
-and it is not a primary-key lookup: it is a gap-and-island grouping that finds
-contiguous runs of offending 100 ms samples and discards the short ones.
+`mcp-clickhouse` and recorded in the `sql` column of the `deliverable.fail_windows`
+table. Nobody wrote this SQL by hand, and it is not a primary-key lookup: it is a
+gap-and-island grouping that finds contiguous runs of offending 100 ms samples and
+discards the short ones.
 
 ```sql
 SELECT MIN(t_seconds) AS start_s, MAX(t_seconds) + 0.1 AS end_s,
@@ -300,8 +301,8 @@ And the questions are not lookups. The window scout writes its own grouped scans
 the 100 ms series to find contiguous offending passages; the regression auditor
 self-joins the before and after stages on the same `t_seconds` grid to check that
 nothing outside the treated passages moved. Those statements are recorded verbatim in
-`deliverable.fail_windows.sql` and returned by the API, so "the model chose this
-query" is inspectable rather than asserted.
+the `sql` column of the `deliverable.fail_windows` table and returned by the API, so
+"the model chose this query" is inspectable rather than asserted.
 
 Schema: `qc/schema.sql`. Tables `findings`, `loudness_samples`, `fail_windows`,
 `sources`, `jobs`; views `catalog_status` and `worst_windows`.
@@ -362,7 +363,7 @@ number that reaches a verdict.
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q     # 105 passed
+.venv/bin/python -m pytest tests/ -q     # 107 passed
 ```
 
 Every check is tested in **both directions**: it must go red on bad input and green on good

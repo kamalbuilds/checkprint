@@ -101,8 +101,16 @@ def topology() -> dict:
                 "name": "window_scout",
                 "tools": "mcp-clickhouse via ADK McpToolset",
                 "decides": "which passages of this master the repair may touch",
-                "removing_it": "the repair becomes one gain over the whole programme, "
-                               "so the output file changes",
+                "removing_it": "on a master where a passage would clip once the "
+                               "programme is lifted to target, removing it leaves one "
+                               "gain over the whole programme and the rendered file "
+                               "differs, which is what "
+                               "test_removing_the_scout_changes_the_repaired_audio "
+                               "renders twice and compares. No title in this "
+                               "public-domain corpus has that collision, so here the "
+                               "scout returns no windows, the repair is that single "
+                               "gain already, and the delivered file is identical "
+                               "without it",
             },
             {
                 "name": "repair_planner",
