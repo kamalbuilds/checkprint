@@ -1,8 +1,8 @@
 """The ADK layer must be real, not imported and unused.
 
-These tests are written to FAIL if the ADK integration degrades into decoration,
-which is the specific failure mode the hackathon brief punishes ("build agents
-natively using the Agent Development Kit instead of external wrapper libraries").
+These tests are written to FAIL if the ADK integration degrades into decoration:
+agents built natively on the Agent Development Kit rather than a wrapper library
+that happens to import it.
 
 They deliberately do NOT call Gemini: that needs credentials and costs money per
 run. What they check is the wiring, which is what silently rots.
@@ -49,6 +49,43 @@ def test_supervisor_agent_is_an_adk_agent_holding_the_mcp_toolset():
         "no McpToolset among the agent's tools, so the model is not talking to the "
         f"official mcp-clickhouse server. Tools: {[type(t).__name__ for t in agent.tools]}"
     )
+
+
+def test_every_agent_holding_clickhouse_carries_the_read_only_guardrail():
+    """The read-only fence is a property of all of them, or it is not a guarantee.
+
+    Written as a sweep over every agent factory in the package rather than three
+    named assertions, because the hole this catches was a fourth agent added later
+    with the same toolset and no callback: `qc_supervisor`, reachable from the
+    public /api/review endpoint, held an unguarded copy of the ClickHouse toolset
+    while the graph's three were fenced. A per-agent test would have stayed green.
+    """
+    from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
+
+    from agent import agents as A
+    from agent.supervisor import supervisor_agent
+
+    factories = [A.window_scout, A.repair_planner, A.regression_auditor,
+                 supervisor_agent]
+    holders = []
+    for factory in factories:
+        agent = factory()
+        if not any(isinstance(t, McpToolset) for t in (agent.tools or [])):
+            continue
+        holders.append(agent.name)
+        assert agent.before_tool_callback is not None, (
+            f"{agent.name} holds the ClickHouse toolset with no before_tool_callback, "
+            "so a model has an unfenced connection to the QC record"
+        )
+        callbacks = agent.before_tool_callback
+        if not isinstance(callbacks, list):
+            callbacks = [callbacks]
+        assert A.select_only in callbacks, (
+            f"{agent.name}'s callback is not select_only: {callbacks}"
+        )
+
+    # If nothing held the toolset, the sweep proved nothing.
+    assert len(holders) >= 3, holders
 
 
 def test_toolset_launches_the_official_mcp_clickhouse_server():

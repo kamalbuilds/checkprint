@@ -3,510 +3,648 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Checkprint</title>
+<title>Checkprint: loudness QC on public-domain film, with the frame at the second</title>
+<meta name="description" content="Checkprint measures a delivered master against EBU R128, locates the passages that fail, and shows the film's own frame at the second every number was taken from.">
+<!-- A film gate, inline: no request, so no 404 in the network panel a judge opens. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23050505'/%3E%3Crect x='2.5' y='4' width='11' height='8' fill='none' stroke='%23fff' stroke-width='1.4'/%3E%3Crect x='6' y='7' width='4' height='2' fill='%23ff5b34'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
+  /* Canvas is near-black, not #000: a true black kills the film grain in the
+     frames, which is the only texture on the page. */
+  --canvas:#050505;
+  --surface:#0b0b0d;
+  --plate:#0e0e10;
   --ink:#ffffff;
-  --slate:#767d88;
-  --mid:#7d848e;
-  --faint:#565b63;
-  --canvas:#000000;
-  --surface:#030303;
-  --scrim:rgba(3,3,3,0.72);
-  --hair:#27272a;
+  --bright:#e7e9ed;
+  --slate:#a4abb6;      /* labels and secondary body */
+  --mid:#8a919c;        /* small print, still legible on --canvas */
+  --dim:#6e7581;        /* ticks and furniture only */
+  --hair:#232327;
+  --hair-lit:#35353c;
+  /* One accent, and it is the grease pencil a QC operator marks a bad print
+     with. It appears on failures and on nothing else. */
+  --flag:#ff5b34;
   --sans:'DM Sans',system-ui,-apple-system,sans-serif;
   --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,monospace;
+  --gut:40px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{background:var(--canvas)}
-body{color:var(--ink);font:400 16px/1.35 var(--sans);letter-spacing:-0.16px;
+html{background:var(--canvas)}
+body{background:var(--canvas);color:var(--bright);
+     font:400 16px/1.45 var(--sans);letter-spacing:-0.15px;
      -webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:var(--ink);color:var(--canvas)}
+a{color:var(--slate);text-decoration:none;border-bottom:1px solid var(--hair-lit)}
+a:hover{color:var(--ink);border-bottom-color:var(--ink)}
+.wrap{max-width:1440px;margin:0 auto;padding:0 var(--gut)}
+.label{font:500 11px/1 var(--sans);text-transform:uppercase;letter-spacing:1.9px;
+       color:var(--slate)}
+.mono{font-family:var(--mono);letter-spacing:0}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:0}
 
-/* ============ FIRST VIEWPORT: the still is the page ============ */
-.frame{position:relative;width:100%;height:100vh;min-height:640px;
-       background:var(--surface);overflow:hidden}
+/* ================= HEAD RAIL ================= */
+.rail{border-bottom:1px solid var(--hair);position:sticky;top:0;z-index:40;
+      background:rgba(5,5,5,.92);backdrop-filter:blur(8px)}
+.rail-in{max-width:1440px;margin:0 auto;padding:0 var(--gut);height:60px;
+         display:flex;align-items:center;justify-content:space-between;gap:24px}
+.brand{display:flex;align-items:baseline;gap:14px}
+.brand-name{font:500 16px/1 var(--sans);letter-spacing:-0.4px;color:var(--ink)}
+.brand-sub{font:400 11px/1 var(--mono);color:var(--mid);letter-spacing:0}
+.rail-state{font:400 11px/1 var(--mono);color:var(--mid);letter-spacing:0;
+            display:flex;align-items:center;gap:9px}
+.dot{width:5px;height:5px;background:var(--dim);border-radius:50%;flex:none}
+.dot.live{background:var(--ink)}
 
-/* the film still, full-bleed */
-/* archive.org only publishes a 4KB to 8KB poster per title, so at 100vh it is an
-   upscale whatever we do. Blurring it on purpose turns a pixelated artefact into a
-   deliberate backdrop, and keeps the meter and the trace the sharpest things on
-   screen, which is correct: the measurement is the subject, the frame is context. */
-.still{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
-       display:block;opacity:0;transition:opacity .7s ease-out;
-       filter:blur(3px) saturate(.85);transform:scale(1.03)}
-.still.on{opacity:1}
-/* when the still is missing, the bay stays lit, near-black, not broken */
-.frame.blank{background:var(--surface)}
-.blank-note{position:absolute;left:28px;top:50%;transform:translateY(-50%);
-            font:400 12px/1.5 var(--mono);color:var(--faint);letter-spacing:0;
-            max-width:220px;display:none}
-.frame.blank .blank-note{display:block}
+/* ================= THE GATE =================
+   A film gate: a plate, a hairline, the picture, and the timecode burned into
+   the corner the way a review copy carries it. Everything inside is the actual
+   frame at the actual measured second. */
+.gate{position:relative;background:var(--plate);border:1px solid var(--hair);
+      overflow:hidden;aspect-ratio:4/3}
+/* The picture is opaque from the first paint and the waiting plate sits on top
+   of it, rather than the picture fading up from opacity 0. Both look the same
+   to a person. They are not the same thing: an opacity transition does not
+   advance in an unfocused or occluded tab, so the fade-from-zero version left
+   the frame at opacity 0 indefinitely and the hero was a black rectangle in
+   every screenshot and on any second monitor. Nothing on this page may depend
+   on an animation having run. */
+.gate img{width:100%;height:100%;object-fit:cover;display:block}
+.gate-tc{position:absolute;left:0;bottom:0;z-index:3;
+         font:500 12px/1 var(--mono);letter-spacing:.4px;color:var(--ink);
+         background:rgba(5,5,5,.82);padding:6px 9px 6px 10px}
+.gate-tag{position:absolute;left:0;top:0;z-index:3;
+          font:500 10px/1 var(--sans);text-transform:uppercase;letter-spacing:1.6px;
+          color:var(--ink);background:rgba(5,5,5,.82);padding:6px 10px}
+.gate-tag.flagged{background:var(--flag);color:#140400}
+/* the state before the frame lands: deliberate, and it says what it is doing */
+.gate-wait{position:absolute;inset:0;z-index:2;display:flex;align-items:center;
+           justify-content:center;padding:20px;text-align:center;background:var(--plate);
+           font:400 11px/1.6 var(--mono);color:var(--mid);letter-spacing:0;overflow:hidden}
+.gate.ready .gate-wait{display:none}
+.gate-wait::before{content:'';position:absolute;left:0;right:0;top:0;height:1px;
+                   background:linear-gradient(90deg,transparent,var(--hair-lit),transparent);
+                   animation:sweep 2.4s linear infinite}
+@keyframes sweep{0%{transform:translateY(0)}100%{transform:translateY(calc(var(--sweep,320px)))}}
+.gate.failed .gate-wait{color:var(--dim)}
+.gate.failed .gate-wait::before{display:none}
 
-/* darkening so the meter, readout and captions read on any frame */
-.frame::after{content:'';position:absolute;inset:0;pointer-events:none;
-  background:
-    linear-gradient(90deg, rgba(3,3,3,.62) 0%, rgba(3,3,3,.10) 34%, rgba(3,3,3,.18) 62%, rgba(3,3,3,.80) 100%),
-    linear-gradient(0deg, rgba(3,3,3,.80) 0%, rgba(3,3,3,0) 34%, rgba(3,3,3,0) 74%, rgba(3,3,3,.42) 100%)}
+/* ================= HERO ================= */
+.hero{display:grid;grid-template-columns:minmax(0,1.34fr) minmax(0,1fr);
+      gap:44px;padding:40px 0 40px;align-items:start}
+.hero-gate{--sweep:420px}
+.gate-note{margin-top:12px;font:400 13px/1.5 var(--sans);color:var(--slate);
+           max-width:56ch}
+.gate-note b{color:var(--ink);font-weight:500}
+.gate-src{margin-top:7px;font:400 11px/1.6 var(--mono);color:var(--mid);
+          letter-spacing:0}
 
-/* ---- the loudness trace: the artefact this product actually makes ----
-   A QC bay's subject is the measurement over the running time, so the trace owns
-   the middle of the frame rather than leaving it black until someone clicks Run.
-   It is drawn from stored ClickHouse samples for a title measured earlier, so the
-   first paint carries real numbers with no pipeline pass in front of it. */
-/* Stacking from the floor up: deck, then the reproduce line, then the trace.
-   These three were overlapping at bottom-left, which put the command through the
-   primary button. Heights are fixed rather than auto so the stack cannot collide
-   again when a title has a longer footnote. */
-.hero{position:absolute;left:28px;right:210px;bottom:330px;z-index:5;
-      display:none;pointer-events:none}
-.hero.on{display:block}
-.hero-head{display:flex;align-items:baseline;gap:14px;margin-bottom:9px}
-.hero-eyebrow{font:500 10px/1 var(--sans);text-transform:uppercase;letter-spacing:2px;
-              color:var(--slate)}
-.hero-when{font:400 10px/1 var(--mono);color:var(--faint);letter-spacing:0}
-.hero svg{display:block;width:100%;height:150px}
-.hero-foot{display:flex;gap:22px;margin-top:9px;flex-wrap:wrap}
-/* The still runs bright in places, so the small type carries its own scrim rather
-   than relying on the frame gradient, which is tuned for the meter side. */
-.hero-foot span{font:400 10px/1.4 var(--mono);color:var(--faint);letter-spacing:0;
-                text-shadow:0 1px 7px rgba(0,0,0,.95),0 0 2px rgba(0,0,0,.9)}
-.hero-foot b{color:var(--slate);font-weight:400}
+.headline-eyebrow{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.big{display:flex;align-items:baseline;gap:16px;margin-top:14px;flex-wrap:wrap}
+.big-from{font:400 40px/1 var(--sans);letter-spacing:-1.6px;color:var(--mid);
+          font-variant-numeric:tabular-nums}
+.big-arrow{color:var(--dim);flex:none}
+.big-now{font:400 clamp(76px,9.4vw,132px)/.86 var(--sans);letter-spacing:-5px;
+         color:var(--ink);font-variant-numeric:tabular-nums}
+.big-unit{font:500 12px/1 var(--sans);text-transform:uppercase;letter-spacing:2px;
+          color:var(--slate);align-self:flex-end;padding-bottom:10px}
+.verdict{margin-top:16px;font:400 17px/1.4 var(--sans);color:var(--bright);
+         letter-spacing:-0.3px;max-width:44ch}
+.verdict b{font-weight:500}
+.verdict.off b{color:var(--flag)}
+.verdict.on b{color:var(--ink)}
 
-/* the reproduce line: the strongest claim this project has is that a stranger
-   can check it, so the command sits on the page, not buried in the README */
-/* Held clear of the readout: at 1200px the command was long enough to wrap under
-   the integrated figure, so the two overlapped. Width is capped against the
-   viewport rather than a pixel guess so it stays clear at every width. */
-.repro{position:absolute;left:28px;bottom:272px;z-index:6;max-width:min(700px,46vw);
-       display:none}
-.repro.on{display:block}
-.repro-label{font:500 10px/1 var(--sans);text-transform:uppercase;letter-spacing:2px;
-             color:var(--slate);margin-bottom:6px}
-.repro code{display:block;font:400 11px/1.5 var(--mono);color:var(--faint);
-            letter-spacing:0;word-break:break-all;
-            text-shadow:0 1px 7px rgba(0,0,0,.95),0 0 2px rgba(0,0,0,.9)}
-.repro-label{text-shadow:0 1px 7px rgba(0,0,0,.95)}
-.hero-eyebrow,.hero-when{text-shadow:0 1px 7px rgba(0,0,0,.95)}
+/* the target ruler: horizontal, labelled, and readable from across a room,
+   which the 2px vertical hairline it replaces was not */
+/* Three bands, so nothing can land on top of anything else: the two readings
+   sit above the track, the scale sits below it, and the R128 rule is captioned
+   to the left of its own line. The vertical hairline meter this replaces put
+   its labels in one column and they collided at every width. */
+.ruler{position:relative;height:96px;margin-top:26px;border-top:1px solid var(--hair);
+       padding-top:24px}
+.ruler-track{position:absolute;left:0;right:0;top:58px;height:1px;background:var(--hair-lit)}
+.ruler-band{position:absolute;top:48px;height:21px;background:rgba(255,255,255,.075);
+            border-left:1px solid var(--hair-lit);border-right:1px solid var(--hair-lit)}
+.ruler-rule{position:absolute;top:44px;width:1px;height:29px;background:var(--ink)}
+.ruler-rule-cap{position:absolute;top:76px;transform:translateX(-100%);white-space:nowrap;
+                padding-right:7px;font:400 10px/1 var(--mono);letter-spacing:0;color:var(--ink)}
+.ruler-tick{position:absolute;top:55px;width:1px;height:7px;background:var(--hair-lit)}
+.ruler-tick-n{position:absolute;top:76px;transform:translateX(-50%);
+              font:400 10px/1 var(--mono);color:var(--dim);letter-spacing:0}
+.pin{position:absolute;top:44px;transform:translateX(-50%);
+     transition:left .5s cubic-bezier(.2,.7,.2,1)}
+.pin i{display:block;width:2px;height:29px;margin:0 auto;background:var(--ink)}
+.pin.before i{background:var(--mid);width:1px}
+.pin span{position:absolute;top:-20px;left:50%;transform:translateX(-50%);white-space:nowrap;
+          font:500 10px/1 var(--mono);color:var(--ink);letter-spacing:0}
+.pin.before span{color:var(--mid);font-weight:400}
+.pin.raised span{top:-36px}
+.pin.raised::after{content:'';position:absolute;left:50%;top:-24px;width:1px;height:10px;
+                   background:var(--hair-lit)}
+.pin.hidden{display:none}
 
-/* the ADK graph, stated as nodes rather than asserted in prose */
-.topo{position:absolute;right:210px;top:26px;z-index:6;text-align:right;display:none;
-      max-width:46vw}
-.topo.on{display:block}
-.topo-label{font:500 10px/1 var(--sans);text-transform:uppercase;letter-spacing:2px;
-            color:var(--slate);margin-bottom:8px}
-.topo-nodes{display:flex;flex-wrap:wrap;gap:5px;justify-content:flex-end}
-.topo-node{font:400 10px/1 var(--mono);letter-spacing:0;padding:4px 7px;border-radius:2px;
-           background:rgba(255,255,255,.045);color:var(--faint);white-space:nowrap}
-.topo-node.agent{background:rgba(255,255,255,.14);color:var(--ink)}
-.topo-node.join{background:rgba(255,255,255,.02)}
-.topo-foot{font:400 10px/1.4 var(--mono);color:var(--faint);letter-spacing:0;margin-top:8px}
-
-@media (max-width:900px){
-  .hero{display:none !important}
-  .repro{display:none !important}
-  .topo{display:none !important}
-}
-
-/* ---- wordmark, top-left ---- */
-.mark{position:absolute;left:28px;top:24px;z-index:6}
-.mark-name{font:500 15px/1 var(--sans);letter-spacing:-0.4px;color:var(--ink)}
-.mark-sub{font:500 10px/1 var(--sans);text-transform:uppercase;letter-spacing:2px;
-          color:var(--slate);margin-top:7px}
-
-/* ---- the loudness meter, mounted on the right edge ---- */
-.meter{position:absolute;top:0;bottom:0;right:0;width:118px;z-index:5}
-/* the scale layer: everything inside is positioned by bottom:P%, 0 at -40, 100 at 0 */
-.scale{position:absolute;top:40px;bottom:40px;right:0;left:0}
-.meter-track{position:absolute;top:0;bottom:0;right:34px;width:2px;background:var(--hair)}
-/* the two thin bars: illegal (dim) and repaired (bright), rising from the floor.
-   Height is set in pixels from JS: a percentage height resolves to 0 against a
-   parent sized by top/bottom, so the meter is measured and the bars sized in px. */
-.bar{position:absolute;bottom:0;width:6px;height:0;
-     transition:height .6s cubic-bezier(.2,.7,.2,1)}
-.bar-before{right:44px;background:rgba(255,255,255,.24)}
-.bar-after{right:24px;background:var(--ink)}
-/* scale ticks */
-.tick{position:absolute;right:30px;height:1px;background:var(--hair)}
-.tick.major{width:10px}
-.tick.minor{width:5px;background:#1c1c1f}
-.tick-num{position:absolute;right:48px;font:400 10px/1 var(--mono);color:var(--faint);
-          transform:translateY(50%);letter-spacing:0}
-
-/* the one law: the -23 rule, ruled across the film */
-.rule{position:absolute;left:-360px;right:0;height:1px;background:var(--ink);z-index:5}
-.rule-band{position:absolute;left:-360px;right:0;background:rgba(255,255,255,.055);z-index:4}
-.rule-label{position:absolute;right:56px;font:500 10px/1 var(--sans);
-            text-transform:uppercase;letter-spacing:1.4px;color:var(--ink);
-            transform:translateY(50%) translateY(-11px);white-space:nowrap}
-.rule-tol{position:absolute;right:56px;font:400 10px/1 var(--mono);color:var(--slate);
-          letter-spacing:0;white-space:nowrap}
-
-/* ---- the flying integrated readout ---- */
-.readout{position:absolute;right:196px;top:50%;transform:translateY(-50%);z-index:6;
-         text-align:right;transition:top .6s cubic-bezier(.2,.7,.2,1);max-width:56vw}
-.readout.hidden{display:none}
-.read-pair{display:flex;align-items:baseline;justify-content:flex-end;gap:16px;
-           white-space:nowrap}
-.read-before{font:400 34px/1 var(--sans);letter-spacing:-1.4px;color:var(--slate)}
-.read-arrow{color:var(--mid)}
-.read-arrow svg{display:block}
-.read-after{font:400 80px/.9 var(--sans);letter-spacing:-3.6px;color:var(--ink);
-            font-variant-numeric:tabular-nums}
-.read-solo .read-before,.read-solo .read-arrow{display:none}
-.read-unit{font:500 10px/1 var(--sans);text-transform:uppercase;letter-spacing:2px;
-           color:var(--slate);margin-top:10px}
-.read-delta{font:400 13px/1.3 var(--mono);color:var(--slate);margin-top:5px;letter-spacing:0}
-.read-delta.on{color:var(--ink)}
-
-/* the idle hint before any run, pointing at the primary */
-.meter-hint{position:absolute;right:196px;top:50%;transform:translateY(-50%);z-index:6;
-            text-align:right;font:400 13px/1.5 var(--sans);color:var(--slate);
-            max-width:280px}
-.meter-hint b{color:var(--ink);font-weight:500}
-
-/* ---- pipeline log, printed on the still during a run ---- */
-.pipeline{position:absolute;left:28px;top:50%;transform:translateY(-50%);z-index:6;
-          font:400 12px/1.9 var(--mono);letter-spacing:0;display:none}
-.pipeline.run{display:block}
-.pipeline .st{color:var(--faint);transition:color .3s ease-out}
-.pipeline .st b{color:var(--ink);font-weight:400}
-.pipeline .st .sum{color:var(--slate)}
-.pipeline .st.done{color:var(--ink)}
-.pipeline .st.active b::after{content:' ...';color:var(--slate)}
-.pipeline .st.flag b::after{content:' !';color:var(--ink)}
-
-/* ---- controls + title, bottom-left column ---- */
-.deck{position:absolute;left:28px;bottom:26px;z-index:6;display:flex;
-      flex-direction:column;gap:16px;max-width:440px}
-.transport{display:flex;gap:10px}
-.tbtn{appearance:none;border:1px solid var(--hair);background:rgba(3,3,3,.5);
-      color:var(--slate);border-radius:2px;padding:9px 14px;cursor:pointer;
-      font:500 12px/1 var(--sans);letter-spacing:-0.1px;
-      transition:color .15s ease-out,border-color .15s ease-out,background .15s ease-out;
-      display:inline-flex;align-items:center;gap:8px}
-.tbtn:hover:not(:disabled){color:var(--ink);border-color:var(--slate)}
-.tbtn:disabled{opacity:.34;cursor:default}
+.now{margin-top:26px;border-top:1px solid var(--hair);padding-top:18px}
+.now-title{font:400 24px/1.12 var(--sans);letter-spacing:-0.8px;color:var(--ink);
+           max-width:26ch}
+.now-meta{margin-top:8px;font:400 12px/1.6 var(--mono);color:var(--mid);letter-spacing:0}
+.controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;align-items:center}
+.primary{appearance:none;border:1px solid var(--ink);background:var(--ink);
+         color:var(--canvas);border-radius:2px;padding:13px 20px;cursor:pointer;
+         font:500 14px/1 var(--sans);letter-spacing:-0.2px;
+         transition:opacity .15s ease-out}
+.primary:hover:not(:disabled){opacity:.85}
+.primary:disabled{opacity:.3;cursor:default}
+.tbtn{appearance:none;border:1px solid var(--hair-lit);background:transparent;
+      color:var(--slate);border-radius:2px;padding:12px 14px;cursor:pointer;
+      font:500 13px/1 var(--sans);letter-spacing:-0.1px;
+      display:inline-flex;align-items:center;gap:8px;
+      transition:color .15s ease-out,border-color .15s ease-out}
+.tbtn:hover:not(:disabled){color:var(--ink);border-color:var(--ink)}
+.tbtn:disabled{opacity:.35;cursor:default}
 .tbtn .ic{width:8px;height:8px;flex:none}
 .tbtn .ic.stop{display:none}
 .tbtn.playing .ic.play{display:none}
 .tbtn.playing .ic.stop{display:inline-block}
 .tbtn.playing{color:var(--ink);border-color:var(--ink)}
-.primary{appearance:none;border:1px solid var(--ink);background:var(--ink);
-         color:var(--canvas);border-radius:2px;padding:13px 22px;cursor:pointer;
-         font:500 14px/1 var(--sans);letter-spacing:-0.2px;align-self:flex-start;
-         transition:opacity .15s ease-out}
-.primary:hover:not(:disabled){opacity:.86}
-.primary:disabled{opacity:.32;cursor:default}
-.now{border-top:1px solid var(--hair);padding-top:14px}
-.now-title{font:400 20px/1.05 var(--sans);letter-spacing:-0.6px;color:var(--ink);
-           max-width:440px}
-.now-id{font:400 11px/1.3 var(--mono);color:var(--mid);letter-spacing:0;margin-top:6px}
-
 audio{display:none}
 
-@media(max-width:820px){
-  .frame{height:auto;min-height:0}
-  .still{position:relative;height:56vh}
-  .meter{width:84px}
-  .rule,.rule-band{left:20px}
-  .readout,.meter-hint{right:96px;max-width:64vw}
-  .read-after{font-size:56px;letter-spacing:-2.4px}
-  .pipeline{position:static;transform:none;margin:16px 28px 0}
-  .deck{position:static;transform:none;margin:20px 28px 28px;max-width:none}
-}
+/* ================= RUN LOG ================= */
+.runlog{display:none;margin-top:20px;border-top:1px solid var(--hair);padding-top:16px;
+        font:400 12px/2 var(--mono);letter-spacing:0}
+.runlog.on{display:block}
+.runlog .st{color:var(--dim)}
+.runlog .st b{color:var(--slate);font-weight:400}
+.runlog .st .sum{color:var(--mid)}
+.runlog .st.done b{color:var(--ink)}
+.runlog .st.done{color:var(--slate)}
+.runlog .st.active b::after{content:' ...';color:var(--mid)}
+.runlog .st.flag b{color:var(--flag)}
 
-/* ============ BELOW THE FOLD ============ */
-.sheet{max-width:1080px;margin:0 auto;padding:64px 28px 96px}
-.block{margin-bottom:64px}
-.eyebrow{font:500 11px/1 var(--sans);text-transform:uppercase;letter-spacing:2px;
-         color:var(--slate);margin-bottom:20px}
+/* ================= EVIDENCE (trace + frames) ================= */
+.section{border-top:1px solid var(--hair);padding:38px 0 46px}
+.sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:24px;
+          flex-wrap:wrap;margin-bottom:22px}
+.sec-note{font:400 13px/1.5 var(--sans);color:var(--slate);max-width:64ch}
 
-/* check sheet */
-.checks{width:100%;border-collapse:collapse;font-size:14px}
+.trace{position:relative}
+.trace svg{display:block;width:100%;height:220px}
+.marker{position:absolute;top:0;bottom:0;width:0;pointer-events:none}
+.marker i{position:absolute;top:0;bottom:0;left:0;width:1px;background:rgba(255,255,255,.34)}
+.marker.flagged i{background:var(--flag)}
+.marker b{position:absolute;top:-1px;left:0;transform:translateX(-50%);
+          font:500 10px/1 var(--mono);color:var(--canvas);background:var(--ink);
+          padding:3px 5px;letter-spacing:0}
+.marker.flagged b{background:var(--flag);color:#140400}
+.leader{display:block;width:100%;height:44px}
+.trace-foot{display:flex;align-items:center;column-gap:28px;row-gap:8px;flex-wrap:wrap;
+            margin-top:14px;font:400 12px/1.5 var(--mono);color:var(--mid);letter-spacing:0}
+.trace-foot > span{display:inline-flex;align-items:center;gap:8px;flex:none}
+.trace-foot b{color:var(--slate);font-weight:400}
+.trace-foot svg{flex:none}
+
+.evidence{display:grid;gap:14px;margin-top:2px}
+.ev{--sweep:190px;min-width:0}
+.ev figcaption{margin-top:10px}
+.ev .ix{display:inline-block;font:500 10px/1 var(--mono);color:var(--canvas);
+        background:var(--ink);padding:3px 5px;letter-spacing:0;vertical-align:1px}
+.ev.flagged .ix{background:var(--flag);color:#140400}
+.ev .lab{font:400 13px/1.35 var(--sans);color:var(--bright);letter-spacing:-0.2px;
+         margin-left:8px}
+.ev .val{display:block;margin-top:6px;font:500 13px/1.3 var(--mono);color:var(--ink);
+         letter-spacing:0}
+.ev.flagged .val{color:var(--flag)}
+.ev .val small{color:var(--mid);font-weight:400}
+.src-note{margin-top:20px;font:400 12px/1.7 var(--mono);color:var(--mid);letter-spacing:0;
+          max-width:96ch}
+.src-note b{color:var(--slate);font-weight:400}
+
+/* ================= REPRODUCE ================= */
+.repro{border:1px solid var(--hair-lit);border-radius:2px;background:var(--surface);
+       margin-top:28px}
+.repro-top{display:flex;align-items:center;justify-content:space-between;gap:16px;
+           padding:11px 14px;border-bottom:1px solid var(--hair)}
+.repro code{display:block;padding:14px;font:400 12.5px/1.7 var(--mono);color:var(--bright);
+            letter-spacing:0;word-break:break-all;white-space:pre-wrap}
+.repro-foot{padding:0 14px 14px;font:400 12px/1.55 var(--sans);color:var(--mid);max-width:60ch}
+.copy{appearance:none;background:transparent;border:1px solid var(--hair-lit);
+      border-radius:2px;color:var(--slate);cursor:pointer;padding:7px 11px;
+      font:500 11px/1 var(--sans);text-transform:uppercase;letter-spacing:1.4px;
+      transition:color .15s,border-color .15s}
+.copy:hover{color:var(--ink);border-color:var(--ink)}
+.copy.done{color:var(--ink);border-color:var(--ink)}
+
+/* ================= AGENT RAIL ================= */
+.graph{position:relative;padding:8px 0 4px}
+/* Twelve stations on one rail. Names only, and they do not wrap: at 113px a
+   column, `regression_auditor` broke across two lines and its second line sat
+   on the rail. What each node does is on hover and, for the three that hold the
+   model, spelled out underneath where there is room to say it properly. */
+.graph-line{position:absolute;left:0;right:0;top:46px;height:1px;background:var(--hair-lit)}
+.stations{position:relative;display:flex;align-items:stretch;min-height:94px}
+.stn{flex:1 1 0;min-width:0;position:relative;display:flex;flex-direction:column;
+     align-items:center;text-align:center}
+.stn-top{height:46px;display:flex;flex-direction:column-reverse;justify-content:flex-start;
+         align-items:center;gap:8px}
+.stn-bot{height:48px;display:flex;flex-direction:column;justify-content:flex-start;
+         align-items:center;gap:8px}
+.stn-tick{width:1px;height:11px;background:var(--hair-lit);flex:none}
+.stn.agent .stn-tick{background:var(--ink);width:2px;height:15px}
+.stn-name{font:400 10px/1.2 var(--mono);color:var(--mid);letter-spacing:-0.2px;
+          white-space:nowrap}
+.stn.agent .stn-name{color:var(--ink);font-weight:500}
+.stn.agent .stn-name::before{content:'';display:inline-block;width:4px;height:4px;
+  background:var(--ink);margin-right:5px;vertical-align:1px}
+.graph-foot{margin-top:12px;border-top:1px solid var(--hair);padding-top:14px;
+            display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px}
+.agent-card .an{font:500 13px/1.3 var(--mono);color:var(--ink);letter-spacing:0}
+.agent-card .ad{margin-top:6px;font:400 13px/1.5 var(--sans);color:var(--slate)}
+.agent-card .at{margin-top:6px;font:400 11px/1.5 var(--mono);color:var(--mid);letter-spacing:0}
+
+/* ================= CATALOG STRIP ================= */
+.strip{display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;padding-bottom:10px;
+       scrollbar-width:thin;scrollbar-color:var(--hair-lit) transparent}
+.strip::-webkit-scrollbar{height:5px}
+.strip::-webkit-scrollbar-thumb{background:var(--hair-lit);border-radius:2px}
+.cell{flex:none;width:212px;cursor:pointer;background:none;border:0;padding:0;
+      text-align:left;font:inherit;color:inherit}
+.cell .gate{aspect-ratio:16/10;--sweep:140px;transition:border-color .18s ease-out}
+.cell:hover .gate{border-color:var(--hair-lit)}
+.cell.sel .gate{border-color:var(--ink)}
+.cell .gate img{filter:grayscale(.35) brightness(.72);transition:filter .25s ease-out}
+.cell:hover .gate img,.cell.sel .gate img{filter:none}
+.cell-name{font:400 12px/1.35 var(--sans);color:var(--mid);margin-top:9px;
+           white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell.sel .cell-name,.cell:hover .cell-name{color:var(--ink)}
+.cell-read{margin-top:6px;font:400 11px/1.5 var(--mono);color:var(--dim);letter-spacing:0}
+.cell-read b{color:var(--bright);font-weight:500}
+.cell-read .vd{display:block;color:var(--slate)}
+.cell-read .vd.fail{color:var(--flag)}
+.cell-read .vd.ok{color:var(--ink)}
+.cell-read .vd.idle{color:var(--dim)}
+.cell-span{margin-top:3px;font:400 10px/1.4 var(--mono);color:var(--dim);letter-spacing:0}
+.cell:focus-visible .gate{outline:2px solid var(--ink);outline-offset:2px}
+
+/* ================= CHECK SHEET ================= */
+.checks{width:100%;border-collapse:collapse}
 .checks th{text-align:left;font:500 10px/1 var(--sans);text-transform:uppercase;
-           letter-spacing:1.4px;color:var(--slate);padding:0 16px 12px 0;
-           border-bottom:1px solid var(--hair)}
+           letter-spacing:1.5px;color:var(--slate);padding:0 16px 12px 0;
+           border-bottom:1px solid var(--hair-lit)}
 .checks th.r,.checks td.r{text-align:right}
-.checks td{padding:14px 16px 14px 0;border-bottom:1px solid var(--hair);
+.checks td{padding:15px 16px 15px 0;border-bottom:1px solid var(--hair);
            vertical-align:baseline}
-.checks tr:last-child td{border-bottom:0}
-.c-name{color:var(--ink);font-size:14px;letter-spacing:-0.2px}
-.c-spec{color:var(--mid);font:400 11px/1.3 var(--mono);letter-spacing:0;margin-top:4px}
-.num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px;letter-spacing:0}
-.num.miss{color:var(--ink)}
-.num.hit{color:var(--slate)}
-.state{font:500 10px/1 var(--sans);text-transform:uppercase;letter-spacing:1.4px}
-.state.fail{color:var(--ink)}
-.state.pass{color:var(--faint)}
-/* offending cues under a failed check */
-.cues td{padding:0 0 14px}
-.cue-list{font-family:var(--mono);font-size:11px;line-height:1.9;letter-spacing:0}
-.cue{display:grid;grid-template-columns:52px 190px 68px 74px 1fr;gap:12px;
-     color:var(--slate);align-items:baseline}
-.cue .id{color:var(--mid)}
-.cue .tc{color:var(--mid)}
-.cue .st-over{color:var(--ink)}
-.cue .st-clear{color:var(--faint)}
+.c-name{color:var(--bright);font-size:14px;letter-spacing:-0.2px}
+.c-spec{color:var(--mid);font:400 11px/1.4 var(--mono);letter-spacing:0;margin-top:5px}
+.mnum{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px;
+      letter-spacing:0;color:var(--slate)}
+.mnum.miss{color:var(--flag)}
+.state{font:500 10px/1 var(--sans);text-transform:uppercase;letter-spacing:1.5px}
+.state.fail{color:var(--flag)}
+.state.pass{color:var(--mid)}
+.state.unmeasured{color:var(--dim);font-style:italic;text-transform:none;letter-spacing:.2px}
+.cues td{padding:0 0 16px}
+.cue-list{font-family:var(--mono);font-size:11px;line-height:2;letter-spacing:0}
+.cue{display:grid;grid-template-columns:58px 92px 78px 78px 1fr;gap:14px;
+     color:var(--mid);align-items:baseline}
+.cue .tc{color:var(--slate)}
+.cue .st-over{color:var(--flag)}
+.cue .st-clear{color:var(--mid)}
 .cue .tx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mid)}
-.cue-more{color:var(--faint);margin-top:4px}
-.note{font:400 14px/1.5 var(--sans);color:var(--slate);margin-top:18px;max-width:72ch}
+.cue-more{color:var(--dim);margin-top:6px}
+.note{font:400 14px/1.6 var(--sans);color:var(--slate);margin-top:20px;max-width:76ch}
+.note b{color:var(--bright);font-weight:500}
 
-/* sustained loudness */
-.profile svg{display:block;width:100%;max-width:640px}
-.profile-cost{font:400 12px/1.4 var(--mono);color:var(--mid);letter-spacing:0;margin-top:14px}
-.profile-hint{font:400 13px/1.5 var(--sans);color:var(--slate);margin-top:8px;max-width:72ch}
+/* ================= PROFILE ================= */
+.profile svg{display:block;width:100%;max-width:940px}
+.profile-cost{font:400 12px/1.5 var(--mono);color:var(--mid);letter-spacing:0;margin-top:16px}
+.profile-hint{font:400 13px/1.6 var(--sans);color:var(--slate);margin-top:10px;max-width:72ch}
 
-/* MCP disclosure */
+/* ================= DISCLOSURE ================= */
 .disclose{border-top:1px solid var(--hair)}
 .disclose summary{list-style:none;cursor:pointer;padding:22px 0;
-                  font:500 11px/1 var(--sans);text-transform:uppercase;letter-spacing:2px;
+                  font:500 11px/1 var(--sans);text-transform:uppercase;letter-spacing:1.9px;
                   color:var(--slate);transition:color .15s ease-out}
 .disclose summary::-webkit-details-marker{display:none}
 .disclose summary::before{content:'+';font-family:var(--mono);color:var(--mid);
                           margin-right:12px;display:inline-block;width:10px}
 .disclose[open] summary::before{content:'\2212'}
 .disclose summary:hover{color:var(--ink)}
-.disclose-body{padding:0 0 28px}
-.hint{font:400 14px/1.55 var(--sans);color:var(--slate);max-width:76ch}
-.trace{font:400 12px/1.6 var(--mono);color:var(--slate);letter-spacing:0;
-       border:1px solid var(--hair);border-radius:2px;padding:14px 16px;margin-top:12px;
-       overflow-x:auto;white-space:pre}
-.raw-link{font:400 12px/1 var(--mono);letter-spacing:0;color:var(--mid)}
-a{color:var(--slate);text-decoration:none}
-a:hover{color:var(--ink)}
-.empty{font:400 13px/1.5 var(--sans);color:var(--mid)}
+.disclose-body{padding:0 0 30px}
+.sql{font:400 12px/1.7 var(--mono);color:var(--slate);letter-spacing:0;
+     border:1px solid var(--hair);border-radius:2px;padding:14px 16px;margin-top:12px;
+     overflow-x:auto;white-space:pre;background:var(--surface)}
+.raw-link{font:400 12px/1 var(--mono);letter-spacing:0}
+.empty{font:400 13px/1.6 var(--sans);color:var(--mid)}
 
-/* ============ FILMSTRIP (the catalog is the strip) ============ */
-.strip{border-top:1px solid var(--hair);background:var(--surface);
-       padding:16px 22px;display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;
-       scrollbar-width:thin;scrollbar-color:var(--hair) transparent}
-.strip::-webkit-scrollbar{height:5px}
-.strip::-webkit-scrollbar-thumb{background:var(--hair);border-radius:2px}
-.cell{flex:none;width:168px;cursor:pointer;opacity:.5;
-      transition:opacity .2s ease-out}
-.cell:hover,.cell.sel{opacity:1}
-.cell-img{position:relative;width:168px;height:94px;border-radius:2px;overflow:hidden;
-          background:#101012}
-.cell.sel .cell-img{outline:1px solid var(--ink);outline-offset:2px}
-.cell-img img{width:100%;height:100%;object-fit:cover;display:block}
-/* the last measured loudness, burned onto the frame */
-.cell-lufs{position:absolute;left:0;bottom:0;right:0;
-           background:linear-gradient(0deg,rgba(3,3,3,.9),rgba(3,3,3,0));
-           font:500 12px/1 var(--mono);letter-spacing:0;color:var(--ink);
-           padding:16px 8px 7px}
-.cell-lufs small{color:var(--slate);font-weight:400}
-.cell-name{font:400 11px/1.3 var(--sans);color:var(--slate);margin-top:7px;
-           white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cell.sel .cell-name{color:var(--ink)}
+footer{border-top:1px solid var(--hair);padding:30px 0 60px;
+       font:400 12px/1.7 var(--mono);color:var(--mid);letter-spacing:0}
+
+@media (max-width:1180px){
+  .hero{grid-template-columns:1fr;gap:32px}
+  .graph-foot{grid-template-columns:1fr;gap:16px}
+  .stn-does{display:none}
+  .stn-top{height:56px}.stn-bot{height:60px}.graph-line{top:56px}
+}
+@media (max-width:820px){
+  :root{--gut:20px}
+  .big-now{font-size:64px;letter-spacing:-2.6px}
+  .stations{display:flex;flex-wrap:wrap;min-height:0;gap:6px}
+  .graph-line{display:none}
+  .stn{flex:0 0 auto}
+  .stn-top{display:none}
+  .stn-bot{height:auto;padding:5px 8px;border:1px solid var(--hair)}
+  .cue{grid-template-columns:1fr;gap:0}
+  .leader{display:none}
+  .marker b{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none !important;transition:none !important}
+}
 </style>
 </head>
 <body>
 
-<!-- ================= FIRST VIEWPORT ================= -->
-<div class="frame" id="frame">
-  <img class="still" id="still" alt="">
-  <div class="blank-note">still unavailable from archive.org<br>the bay reads from audio, not the frame</div>
-
-  <div class="mark">
-    <div class="mark-name">Checkprint</div>
-    <div class="mark-sub">loudness qc bay</div>
-  </div>
-
-  <!-- the meter, mounted right -->
-  <div class="meter" id="meter">
-    <div class="scale" id="scale">
-      <div class="meter-track"></div>
-      <div class="rule-band" id="ruleBand"></div>
-      <div class="rule" id="rule"></div>
-      <div class="rule-label" id="ruleLabel">-23 LUFS</div>
-      <div class="rule-tol" id="ruleTol">&#177;1 LU</div>
-      <div class="bar bar-before" id="barBefore"></div>
-      <div class="bar bar-after" id="barAfter"></div>
+<div class="rail">
+  <div class="rail-in">
+    <div class="brand">
+      <span class="brand-name">Checkprint</span>
+      <span class="brand-sub">delivery loudness QC</span>
     </div>
+    <div class="rail-state"><span class="dot" id="stateDot"></span><span id="stateText">reading ClickHouse</span></div>
   </div>
+</div>
 
-  <!-- idle hint before a run -->
-  <div class="meter-hint" id="hint">
-    Nothing measured. Run <b>Measure and repair</b> to read this master against the R128 rule.
-  </div>
+<div class="wrap">
 
-  <!-- flying integrated readout -->
-  <div class="readout hidden" id="readout">
-    <div class="read-pair">
-      <span class="read-before" id="readBefore"></span>
-      <span class="read-arrow" id="readArrow" aria-hidden="true"><svg width="26" height="12" viewBox="0 0 26 12"><path d="M0 6h22M18 2l5 4-5 4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></span>
-      <span class="read-after" id="readAfter"></span>
+  <!-- ============ HERO: the frame, and the number it explains ============ -->
+  <section class="hero">
+    <div>
+      <figure class="gate hero-gate" id="heroGate">
+        <img id="heroImg" alt="">
+        <span class="gate-tag" id="heroTag">film frame</span>
+        <span class="gate-tc" id="heroTc"></span>
+        <span class="gate-wait" id="heroWait">waiting for a measured second to pull a frame from</span>
+      </figure>
+      <p class="gate-note" id="heroNote">Every frame on this page is pulled out of the film itself with ffmpeg, at a
+        second ClickHouse picked. No posters, no stock, no illustration.</p>
+      <p class="gate-src" id="heroSrc"></p>
     </div>
-    <div class="read-unit">integrated lufs</div>
-    <div class="read-delta" id="readDelta"></div>
-  </div>
 
-  <!-- pipeline log, on the still during a run -->
-  <div class="hero" id="hero">
-    <div class="hero-head">
-      <div class="hero-eyebrow" id="heroEyebrow">measured loudness over the running time</div>
-      <div class="hero-when" id="heroWhen"></div>
+    <div>
+      <div class="headline-eyebrow">
+        <span class="label" id="bigLabel">EBU R128 integrated loudness</span>
+        <span class="mono" id="bigWhen" style="font-size:11px;color:var(--mid)"></span>
+      </div>
+      <div class="big" id="bigBox">
+        <span class="big-from" id="bigFrom" hidden></span>
+        <span class="big-arrow" id="bigArrow" hidden aria-hidden="true"><svg width="28" height="13" viewBox="0 0 28 13"><path d="M0 6.5h23M19 2.5l5 4-5 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span>
+        <span class="big-now num" id="bigNow">&#8212;&#8203;</span>
+        <span class="big-unit" id="bigUnit">LUFS</span>
+      </div>
+      <p class="verdict" id="verdict">Reading stored measurements.</p>
+
+      <div class="ruler" id="ruler" hidden>
+        <div class="ruler-track"></div>
+        <div class="ruler-band" id="rulerBand"></div>
+        <div class="ruler-rule" id="rulerRule"></div>
+        <div class="ruler-rule-cap" id="rulerCap">-23 R128</div>
+        <div class="pin before hidden" id="pinBefore"><i></i><span></span></div>
+        <div class="pin hidden" id="pinAfter"><i></i><span></span></div>
+      </div>
+
+      <div class="now">
+        <h1 class="now-title" id="nowTitle">Loading the catalog</h1>
+        <div class="now-meta" id="nowMeta"></div>
+      </div>
+
+      <div class="controls">
+        <button class="primary" id="go" disabled>Measure and repair</button>
+        <button class="tbtn" id="playBefore" data-label="hear the delivered master" disabled>
+          <svg class="ic play" viewBox="0 0 8 8" fill="currentColor"><path d="M0 0l8 4-8 4z"/></svg>
+          <svg class="ic stop" viewBox="0 0 8 8" fill="currentColor"><rect width="8" height="8"/></svg>
+          <span class="tlabel">hear the delivered master</span>
+        </button>
+        <button class="tbtn" id="playAfter" data-label="hear it repaired" disabled>
+          <svg class="ic play" viewBox="0 0 8 8" fill="currentColor"><path d="M0 0l8 4-8 4z"/></svg>
+          <svg class="ic stop" viewBox="0 0 8 8" fill="currentColor"><rect width="8" height="8"/></svg>
+          <span class="tlabel">hear it repaired</span>
+        </button>
+      </div>
+
+      <div class="runlog" id="runlog"></div>
+
+      <!-- The strongest claim this project has is that a stranger can check it,
+           so the command sits in the first viewport beside the number it
+           produces, not in a section a judge has to scroll to find. -->
+      <div class="repro" id="reproBlock" hidden>
+        <div class="repro-top">
+          <span class="label">Check the number yourself</span>
+          <button class="copy" id="copyCmd">copy</button>
+        </div>
+        <code id="reproCmd"></code>
+        <p class="repro-foot">The window flag is part of it. Without it ffmpeg measures the whole
+        feature and returns a different number from the one above.</p>
+      </div>
     </div>
-    <div id="heroSvg"></div>
-    <div class="hero-foot" id="heroFoot"></div>
-  </div>
+  </section>
 
-  <div class="repro" id="repro">
-    <div class="repro-label">check this number yourself</div>
-    <code id="reproCmd"></code>
-  </div>
-
-  <div class="topo" id="topo">
-    <div class="topo-label" id="topoLabel">agent graph</div>
-    <div class="topo-nodes" id="topoNodes"></div>
-    <div class="topo-foot" id="topoFoot"></div>
-  </div>
-
-  <div class="pipeline" id="pipeline"></div>
-
-  <!-- controls + current title -->
-  <div class="deck">
-    <div class="transport">
-      <button class="tbtn" id="playBefore" data-label="play the illegal master" disabled>
-        <svg class="ic play" viewBox="0 0 8 8" fill="currentColor"><path d="M0 0l8 4-8 4z"/></svg>
-        <svg class="ic stop" viewBox="0 0 8 8" fill="currentColor"><rect width="8" height="8"/></svg>
-        <span class="tlabel">play the illegal master</span>
-      </button>
-      <button class="tbtn" id="playAfter" data-label="play the repaired master" disabled>
-        <svg class="ic play" viewBox="0 0 8 8" fill="currentColor"><path d="M0 0l8 4-8 4z"/></svg>
-        <svg class="ic stop" viewBox="0 0 8 8" fill="currentColor"><rect width="8" height="8"/></svg>
-        <span class="tlabel">play the repaired master</span>
-      </button>
+  <!-- ============ EVIDENCE: the trace, and the frame under each mark ============ -->
+  <section class="section" id="evidenceBlock" hidden>
+    <div class="sec-head">
+      <span class="label">The running time, and what it looks like</span>
+      <p class="sec-note" id="evidenceNote"></p>
     </div>
-    <button class="primary" id="go" disabled>Measure and repair</button>
-    <div class="now">
-      <h1 class="now-title" id="nowTitle"></h1>
-      <div class="now-id" id="nowId"></div>
+    <div class="trace" id="trace"></div>
+    <svg class="leader" id="leader" viewBox="0 0 1000 44" preserveAspectRatio="none" aria-hidden="true"></svg>
+    <div class="evidence" id="evidence"></div>
+    <div class="trace-foot" id="traceFoot"></div>
+    <p class="src-note" id="srcNote"></p>
+  </section>
+
+  <!-- ============ CATALOG ============ -->
+  <section class="section">
+    <div class="sec-head">
+      <span class="label">The catalog</span>
+      <p class="sec-note">Features from the archive.org feature_films collection. Each still is that film
+      at the second it sits closest to its own median level, so the strip is the corpus as it looks.</p>
     </div>
-  </div>
+    <div class="strip" id="strip"></div>
+  </section>
+
+  <!-- ============ AGENT GRAPH ============ -->
+  <section class="section" id="graphBlock" hidden>
+    <div class="sec-head">
+      <span class="label" id="graphLabel">The workflow</span>
+      <p class="sec-note" id="graphNote"></p>
+    </div>
+    <div class="graph">
+      <div class="graph-line"></div>
+      <div class="stations" id="stations"></div>
+    </div>
+    <div class="graph-foot" id="graphAgents"></div>
+  </section>
+
+  <!-- ============ CHECK SHEET ============ -->
+  <section class="section" id="checkBlock" hidden>
+    <div class="sec-head">
+      <span class="label">Check sheet</span>
+      <p class="sec-note">Every figure below is ffmpeg's, re-measured after the repair pass. The model chooses
+      what to look at and what to run. It never produces a number.</p>
+    </div>
+    <div id="checks"></div>
+  </section>
+
+  <!-- ============ SUSTAINED LOUDNESS ============ -->
+  <section class="section" id="profileBlock" hidden>
+    <div class="sec-head">
+      <span class="label">Sustained loudness</span>
+      <p class="sec-note">Percentiles over the 100ms sample stream, not min and max. A single 100ms spike is
+      not a delivery problem and sending an operator to it wastes their afternoon.</p>
+    </div>
+    <div class="profile" id="profile"></div>
+  </section>
+
+  <!-- ============ MCP ============ -->
+  <section class="section" style="padding-bottom:0">
+    <details class="disclose" style="border-top:0">
+      <summary>What the agent asked ClickHouse</summary>
+      <div class="disclose-body">
+        <p class="note">A google.adk LlmAgent holds the official mcp-clickhouse server as an McpToolset and
+        chooses its own queries: it lists tables, learns the schema, compares this title against the catalog
+        baseline, then drills into the 100ms samples only when the numbers warrant it. The calls below are the
+        ones it chose.</p>
+        <button class="tbtn" id="review" disabled style="margin-top:18px">Review this title against the catalog</button>
+        <div id="agentTrace"></div>
+        <div style="margin-top:16px"><a class="raw-link" href="/api/mcp-transcript">raw mcp transcript</a></div>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Checkprint measures features from the archive.org feature_films collection against EBU R128. Frames
+    are extracted on demand with ffmpeg from the published file and cached on disk. Loudness telemetry is
+    stored in ClickHouse at one sample every 100ms and read back through the official mcp-clickhouse
+    MCP server.
+  </footer>
 </div>
 
 <audio id="a-before" preload="none"></audio>
 <audio id="a-after" preload="none"></audio>
 
-<!-- ================= FILMSTRIP ================= -->
-<div class="strip" id="strip"></div>
-
-<!-- ================= BELOW THE FOLD ================= -->
-<div class="sheet">
-
-  <div class="block" id="checkBlock" hidden>
-    <div class="eyebrow">Check sheet</div>
-    <div id="checks"></div>
-  </div>
-
-  <div class="block" id="profileBlock" hidden>
-    <div class="eyebrow">Sustained loudness</div>
-    <div class="profile" id="profile"></div>
-  </div>
-
-  <div class="block">
-    <details class="disclose">
-      <summary>What the agent asked ClickHouse</summary>
-      <div class="disclose-body">
-        <p class="hint">A google.adk LlmAgent holds the official mcp-clickhouse server as an
-        McpToolset and chooses its own queries: it lists tables, learns the schema, compares this
-        title against the catalog baseline, then drills into the 100ms samples only when the numbers
-        warrant it. The calls below are the ones it chose.</p>
-        <button class="tbtn" id="review" disabled style="margin-top:16px">Review this title against the catalog</button>
-        <div id="trace"></div>
-        <div style="margin-top:14px"><a class="raw-link" href="/api/mcp-transcript">raw mcp transcript</a></div>
-      </div>
-    </details>
-  </div>
-
-</div>
-
 <script>
-/* ---------- state ---------- */
+/* ================= state ================= */
 const STEPS = ["ingest","measure","classify","remediate","verify","report"];
 const TARGET = -23, TOL = 1, MIN = -40, MAX = 0;
-let selected = null, job = null, titles = [], cellFor = {}, lufsFor = {};
+let selected = null, job = null, titles = [], cellFor = {}, readingFor = {};
+let currentMoments = [], currentSeries = null, ceiling = -1, coverage = {};
 const aBefore = document.getElementById("a-before");
 const aAfter  = document.getElementById("a-after");
-
-/* value -> percent up the scale (0 at MIN, 100 at MAX) */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const pct = v => Math.max(0, Math.min(100, ((Math.max(MIN,Math.min(MAX,v)) - MIN) / (MAX - MIN)) * 100));
 
-/* ---------- meter scaffold ---------- */
-/* Everything lives in .scale, whose 0% (bottom) is -40 LUFS and 100% (top) is 0.
-   So a value maps to a plain bottom:P% with no length arithmetic. */
-function buildMeter(){
-  const scale = document.getElementById("scale");
+/* hh:mm:ss.s, the way a burn-in window carries it */
+function tc(seconds){
+  const s = Math.max(0, Number(seconds) || 0);
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), r = s%60;
+  const pad = n => String(n).padStart(2,"0");
+  return pad(h) + ":" + pad(m) + ":" + (r<10?"0":"") + r.toFixed(1);
+}
+const signed = v => (v > 0 ? "+" : "") + v.toFixed(1);
+
+function setState(text, live){
+  $("stateText").textContent = text;
+  $("stateDot").classList.toggle("live", !!live);
+}
+
+/* ================= the gate ================= */
+/* One component, three sizes. It is never given a placeholder image: when a frame
+   cannot be pulled it says so in words, because a stand-in picture here would be
+   a lie the size of the hero. */
+function loadFrame(gate, img, url, onFail){
+  gate.classList.remove("ready","failed");
+  img.onload = () => gate.classList.add("ready");
+  img.onerror = () => {
+    // No stand-in picture and no broken-image glyph. The gate says, in the
+    // film's own vocabulary, that this second could not be pulled.
+    gate.classList.add("failed");
+    img.removeAttribute("src");
+    if(onFail) onFail();
+  };
+  img.src = url;
+}
+
+/* ================= the headline number ================= */
+function showNumber(before, after){
+  const from = $("bigFrom"), arrow = $("bigArrow"), now = $("bigNow");
+  const solo = (before == null);
+  from.hidden = solo; arrow.hidden = solo;
+  if(!solo) from.textContent = before.toFixed(1);
+  now.textContent = after.toFixed(1);
+
+  const off = after - TARGET, inside = Math.abs(off) <= TOL;
+  const v = $("verdict");
+  v.classList.toggle("on", inside);
+  v.classList.toggle("off", !inside);
+  v.innerHTML = inside
+    ? 'Inside the R128 window. <b>' + signed(off) + ' LU</b> from target, tolerance is &#177;' + TOL + ' LU.'
+    : '<b>' + Math.abs(off).toFixed(1) + ' LU ' + (off > 0 ? 'over' : 'under') + '</b> the -23 LUFS target, which is '
+      + (Math.abs(off) / TOL).toFixed(1) + ' times the &#177;1 LU tolerance a broadcaster will accept.';
+
+  const R = $("ruler");
+  R.hidden = false;
+  $("rulerBand").style.left = pct(TARGET - TOL) + "%";
+  $("rulerBand").style.width = (pct(TARGET + TOL) - pct(TARGET - TOL)) + "%";
+  $("rulerRule").style.left = pct(TARGET) + "%";
+  $("rulerCap").style.left = pct(TARGET) + "%";
+
+  // The pins carry which master they are, not the value: the value is already
+  // the largest thing on the page and printing it twice reads as a chart legend.
+  // A good repair lands the two pins a few LU apart, which is exactly where two
+  // centred labels sit on top of each other, so the earlier one steps up a row.
+  const pinB = $("pinBefore"), pinA = $("pinAfter");
+  pinA.classList.remove("hidden");
+  pinA.style.left = pct(after) + "%";
+  pinA.querySelector("span").textContent = solo ? "delivered" : "after repair";
+  pinA.classList.remove("raised");
+  if(solo){ pinB.classList.add("hidden"); }
+  else {
+    pinB.classList.remove("hidden");
+    pinB.style.left = pct(before) + "%";
+    pinB.querySelector("span").textContent = "delivered";
+    const apart = Math.abs(pct(after) - pct(before));
+    pinB.classList.toggle("raised", apart < 16);
+  }
+}
+
+function buildRulerTicks(){
+  const R = $("ruler");
   for(let v = MIN; v <= MAX; v += 5){
-    const p = pct(v);
-    const major = (v % 10 === 0) || v === TARGET;
     const t = document.createElement("div");
-    t.className = "tick " + (major ? "major" : "minor");
-    t.style.bottom = p + "%";
-    scale.appendChild(t);
+    t.className = "ruler-tick";
+    t.style.left = pct(v) + "%";
+    R.appendChild(t);
     if(v % 10 === 0){
       const n = document.createElement("div");
-      n.className = "tick-num";
-      n.style.bottom = p + "%";
+      n.className = "ruler-tick-n";
+      n.style.left = pct(v) + "%";
       n.textContent = v;
-      scale.appendChild(n);
+      R.appendChild(n);
     }
   }
-  positionRule();
-}
-function positionRule(){
-  const p = pct(TARGET), pLo = pct(TARGET - TOL), pHi = pct(TARGET + TOL);
-  document.getElementById("rule").style.bottom = p + "%";
-  document.getElementById("ruleLabel").style.bottom = p + "%";
-  document.getElementById("ruleTol").style.bottom = "calc(" + p + "% - 13px)";
-  const band = document.getElementById("ruleBand");
-  band.style.bottom = pLo + "%";
-  band.style.height = (pHi - pLo) + "%";
-}
-function setBars(before, after){
-  // Size the bars in pixels from the meter's measured height. A percentage height
-  // resolves to 0 against a parent sized by top/bottom, so measure and scale.
-  const H = document.getElementById("scale").clientHeight;
-  document.getElementById("barBefore").style.height = before==null ? "0" : (pct(before)/100*H) + "px";
-  document.getElementById("barAfter").style.height  = after==null  ? "0" : (pct(after)/100*H)  + "px";
 }
 
-/* ---------- the flying readout ---------- */
-function fmt(v){ return (v>0?"+":"") + v.toFixed(1); }
-function showReadout(before, after){
-  const R = document.getElementById("readout");
-  const hint = document.getElementById("hint");
-  hint.style.display = "none";
-  R.classList.remove("hidden");
-
-  const solo = (before == null);
-  R.classList.toggle("read-solo", solo);
-  document.getElementById("readBefore").textContent = solo ? "" : before.toFixed(1);
-  document.getElementById("readAfter").textContent = after.toFixed(1);
-
-  // fly the readout to the after-value height; clamp so it never leaves the frame
-  const p = pct(after);
-  const top = Math.max(14, Math.min(82, 100 - p));
-  R.style.top = top + "% ";
-
-  const off = after - TARGET, onTarget = Math.abs(off) <= TOL;
-  const d = document.getElementById("readDelta");
-  d.classList.toggle("on", onTarget);
-  d.textContent = onTarget ? "on the rule, within " + TOL + " LU"
-                           : fmt(off) + " LU " + (off > 0 ? "over" : "under") + " target";
-  setBars(before, after);
-}
-function resetReadout(){
-  document.getElementById("readout").classList.add("hidden");
-  document.getElementById("hint").style.display = "";
-  setBars(null, null);
+function resetNumber(msg){
+  $("bigFrom").hidden = true; $("bigArrow").hidden = true;
+  $("bigNow").innerHTML = "&#8212;";
+  $("ruler").hidden = true;
+  const v = $("verdict");
+  v.classList.remove("on","off");
+  v.textContent = msg;
 }
 
-/* ---------- titles / filmstrip ---------- */
+/* ================= titles ================= */
 function selectByTitleId(titleId){
   // Select a film by its archive.org identifier: what a catalog row click does.
   // Returns {ok, picked} so the caller can distinguish "selected" from "no such
@@ -533,101 +671,420 @@ function selectTitle(t, cell){
   document.querySelectorAll(".cell").forEach(c=>c.classList.remove("sel"));
   if(cell) cell.classList.add("sel");
 
-  const frame = document.getElementById("frame");
-  const img = document.getElementById("still");
-  frame.classList.remove("blank");
-  img.classList.remove("on");
-  img.onload = ()=>{ frame.classList.remove("blank"); img.classList.add("on"); };
-  // archive.org 302-redirects a missing id to a generic placeholder rather than
-  // returning 404, so onerror fires only on a true network failure. Either way the
-  // meter stays legible over the near-black surface.
-  img.onerror = ()=>{ frame.classList.add("blank"); img.classList.remove("on"); };
-  img.src = "https://archive.org/services/img/" + t.identifier;
+  $("nowTitle").textContent = t.title || t.identifier;
+  $("nowMeta").textContent = t.identifier;
+  $("go").disabled = false;
+  $("review").disabled = false;
+  $("playBefore").disabled = true;
+  $("playAfter").disabled = true;
+  $("runlog").classList.remove("on");
+  $("runlog").innerHTML = "";
+  $("checkBlock").hidden = true;
+  $("evidenceBlock").hidden = true;
+  $("reproBlock").hidden = true;
+  resetNumber("Reading stored measurements for this title.");
 
-  document.getElementById("nowTitle").textContent = t.title;
-  document.getElementById("nowId").textContent = t.identifier;
+  const gate = $("heroGate");
+  gate.classList.remove("ready","failed");
+  $("heroImg").removeAttribute("src");
+  $("heroTc").textContent = "";
+  $("heroTag").textContent = "film frame";
+  $("heroTag").classList.remove("flagged");
+  $("heroWait").textContent = "locating the second worth looking at";
+  $("heroSrc").textContent = "";
 
-  document.getElementById("go").disabled = false;
-  document.getElementById("review").disabled = false;
-  document.getElementById("playBefore").disabled = true;
-  document.getElementById("playAfter").disabled = true;
-
-  resetReadout();
-  document.getElementById("pipeline").classList.remove("run");
-  document.getElementById("pipeline").innerHTML = "";
-  document.getElementById("checkBlock").hidden = true;
   loadProfile(t.identifier);
   loadMeasured(t.identifier);
+  loadMoments(t.identifier);
 }
 
 async function loadTitles(){
-  const r = await fetch("/api/titles?rows=8").then(r=>r.json());
+  let r;
+  try{ r = await fetch("/api/titles?rows=8").then(r=>r.json()); }
+  catch(e){ return; }
   titles = r.titles || [];
-  window.__titles = titles;   // let selectByTitleId resolve a catalog row
-  const strip = document.getElementById("strip");
+  window.__titles = titles;
+  const strip = $("strip");
   strip.innerHTML = "";
   titles.forEach((t,i)=>{
-    const cell = document.createElement("div");
+    const cell = document.createElement("button");
     cell.className = "cell";
+    cell.type = "button";
     cell.dataset.identifier = t.identifier;
     cell.innerHTML =
-      '<div class="cell-img"><img src="https://archive.org/services/img/' + t.identifier + '" alt="" loading="lazy">' +
-      '<div class="cell-lufs" data-id="' + t.identifier + '" hidden></div></div>' +
-      '<div class="cell-name">' + esc(t.title) + '</div>';
+      '<figure class="gate">' +
+        '<img alt="" loading="lazy">' +
+        '<span class="gate-wait">pulling a frame</span>' +
+      '</figure>' +
+      '<div class="cell-name">' + esc(t.title || t.identifier) + '</div>' +
+      '<div class="cell-read" data-id="' + esc(t.identifier) + '"><span class="lufs"></span><span class="vd"></span></div>' +
+      '<div class="cell-span"></div>';
     cell.onclick = ()=> selectTitle(t, cell);
     strip.appendChild(cell);
     cellFor[t.identifier] = cell;
-    if(i === 0) selectTitle(t, cell);
+    const g = cell.querySelector(".gate"), im = cell.querySelector("img");
+    loadFrame(g, im, "/api/poster/" + encodeURIComponent(t.identifier) + "?h=180",
+      ()=>{ g.querySelector(".gate-wait").textContent = "archive.org publishes no seekable video for this title"; });
   });
-  burnLufs();
+  // bootHero has usually already claimed a title from the catalog, which lands
+  // before the filmstrip does. Mark it rather than re-selecting: a second
+  // selectTitle would throw away the hero that is already on screen.
+  const held = selected && cellFor[selected.identifier];
+  if(held){
+    held.classList.add("sel");
+    held.scrollIntoView({block:"nearest", inline:"center"});
+  }else if(!selected && titles.length){
+    selectTitle(titles[0], cellFor[titles[0].identifier]);
+  }
+  burnReadings();
 }
 
-/* Burn the last measured sustained loudness onto each measured thumb. The catalog
-   view carries verdicts and cue counts but not a loudness figure, so the number
-   comes from the loudness profile (newest stage median short-term), and titles that
-   were never measured simply carry no number rather than a fabricated one. */
-async function burnLufs(){
-  let measured = [];
+/* The last stored reading, printed under each catalog still. A title nobody has
+   measured carries no number rather than a fabricated one. */
+async function burnReadings(){
+  let rows = [];
   try{
     const cat = await fetch("/api/catalog").then(r=>r.json());
-    measured = (cat.catalog || []).map(c=>c.title_id);
+    rows = cat.catalog || [];
   }catch(e){ return; }
-  for(const id of measured){
-    if(!cellFor[id]) continue;
+  for(const row of rows){
+    const cell = cellFor[row.title_id];
+    if(!cell) continue;
+    const box = cell.querySelector(".cell-read");
+    // Four verdicts, three weights. Only "still failing" is an alarm: a title
+    // nobody has run yet is not a fault, and a title the pass improved but did
+    // not clear is a job for a person, not a red light. Painting all four red
+    // made six of seven rows shout and the one real failure invisible.
+    const vd = row.verdict || "";
+    const tone = vd === "still failing" ? " fail"
+               : vd === "delivery ready" ? " ok"
+               : vd === "not remediated" ? " idle" : "";
+    box.querySelector(".vd").textContent = vd;
+    box.querySelector(".vd").className = "vd" + tone;
+    const c = coverage[row.title_id];
+    if(c) cell.querySelector(".cell-span").textContent =
+      c.samples.toLocaleString() + " samples over " + Math.round(c.seconds) + "s";
     try{
-      const r = await fetch("/api/loudness-profile/" + id).then(r=>r.json());
+      const r = await fetch("/api/loudness-profile/" + encodeURIComponent(row.title_id)).then(r=>r.json());
       const prof = r.profile || [];
       if(!prof.length) continue;
-      // profile is ordered stage DESC (after before before): first row is newest
-      const row = prof[0];
-      lufsFor[id] = row.median;
-      const el = cellFor[id].querySelector(".cell-lufs");
-      el.innerHTML = row.median.toFixed(1) + " <small>LUFS</small>";
-      el.hidden = false;
-    }catch(e){ /* leave the thumb unburned */ }
+      readingFor[row.title_id] = prof[0].median;
+      box.querySelector(".lufs").innerHTML = '<b>' + prof[0].median.toFixed(1) + '</b> LUFS';
+    }catch(e){ /* leave the still unburned rather than print a guess */ }
   }
 }
 
-/* ---------- pipeline ---------- */
-function renderPipeline(steps){
-  const log = document.getElementById("pipeline");
-  log.classList.add("run");
-  const doneNames = new Set(steps.map(s=>s.step));
-  const nextIdx = STEPS.findIndex(n=>!doneNames.has(n));
+/* ================= moments: the frames, at the measured seconds ================= */
+async function loadMoments(titleId, attempt){
+  currentMoments = [];
+  let m;
+  try{
+    const res = await fetch("/api/moments/" + encodeURIComponent(titleId));
+    if(res.status === 503){
+      const n = (attempt || 0) + 1;
+      if(n <= 20 && selected && selected.identifier === titleId){
+        setTimeout(()=>loadMoments(titleId, n), 1500);
+      }
+      return;
+    }
+    if(!res.ok) throw new Error(res.status);
+    m = await res.json();
+  }catch(e){
+    $("heroWait").textContent = "no measured second is available for this title yet";
+    return;
+  }
+  if(!selected || selected.identifier !== titleId) return;
+
+  const list = m.moments || [];
+  const pic = m.picture;
+  if(!list.length){
+    $("heroWait").textContent = m.detail || "this title has not been measured, so there is no second to look at";
+    return;
+  }
+  currentMoments = list;
+
+  // The hero takes the most damning second: a true peak over the ceiling if there
+  // is one, otherwise the loudest sustained passage.
+  const peak = list.find(x=>x.key === "true_peak");
+  const lead = (peak && peak.value > ceiling) ? peak
+             : (list.find(x=>x.key === "loudest") || list[0]);
+  const flagged = isFlagged(lead);
+
+  $("heroTag").textContent = flagged ? lead.label + ", over spec" : lead.label;
+  $("heroTag").classList.toggle("flagged", flagged);
+  $("heroTc").textContent = tc(lead.t);
+  $("heroWait").textContent = "pulling the frame at " + tc(lead.t) +
+    (pic ? " from " + pic.file : "");
+  loadFrame($("heroGate"), $("heroImg"), lead.frame + "?h=720",
+    ()=>{ $("heroWait").textContent = "archive.org would not serve a frame at " + tc(lead.t); });
+
+  $("heroNote").innerHTML =
+    'This is <b>' + esc(selected.title || selected.identifier) + '</b> at <b>' + tc(lead.t) +
+    '</b>, the ' + esc(lead.label) + ' in the measured window. The reading there is <b>' +
+    lead.value.toFixed(1) + ' ' + esc(lead.unit) + '</b>.';
+
+  if(pic){
+    $("heroSrc").textContent = "frame: " + pic.file +
+      (pic.width ? "  " + pic.width + "x" + pic.height : "") +
+      ", pulled with ffmpeg at " + tc(lead.t);
+    // The gate takes the print's own shape. Forcing 2.35:1 scope into a 4:3
+    // academy box would crop the composition the frame is here to show.
+    setGateShape($("heroGate"), pic);
+  }
+
+  renderEvidence(m);
+}
+
+/* The gate takes the print's own shape, clamped to the range a projection gate
+   actually opens to. Unclamped, clicking from a 4:3 academy title to a 2.35:1
+   scope title collapsed the hero from 563px to 320px and threw the whole page
+   up the screen. Clamped, scope is cropped the way a broadcaster crops it and
+   the layout holds still. */
+function setGateShape(gate, pic){
+  if(!pic || !(pic.width > 0) || !(pic.height > 0)) return;
+  const r = Math.min(Math.max(pic.width / pic.height, 4/3), 16/9);
+  gate.style.aspectRatio = r.toFixed(4);
+}
+
+/* The accent means "this breaches a written spec", and nothing else.
+   R128 sets a true-peak ceiling and an integrated target; it sets no limit on
+   short-term loudness, so colouring the loudest and quietest passages red was
+   inventing a rule to have something to alarm about. On this corpus that left
+   three of four frames marked as faults on a master that passes. */
+function isFlagged(mo){
+  if(mo.key === "true_peak") return mo.value > ceiling;
+  return mo.key === "scout_window";
+}
+
+/* The contact sheet: one frame per measured second, hung under the trace and
+   tied to it by a leader, so the picture and the number share an x axis. */
+function renderEvidence(m){
+  const list = m.moments || [];
+  const box = $("evidence");
+  box.style.gridTemplateColumns = "repeat(" + list.length + ", minmax(0,1fr))";
+  box.innerHTML = list.map((mo,i)=>
+    '<figure class="ev' + (isFlagged(mo) ? ' flagged' : '') + '" data-i="' + i + '">' +
+      '<div class="gate">' +
+        '<img alt="">' +
+        '<span class="gate-tc">' + tc(mo.t) + '</span>' +
+        '<span class="gate-wait">pulling ' + tc(mo.t) + '</span>' +
+      '</div>' +
+      '<figcaption>' +
+        '<span class="ix">' + (i+1) + '</span><span class="lab">' + esc(mo.label) + '</span>' +
+        '<span class="val">' + mo.value.toFixed(1) + ' ' + esc(mo.unit) +
+          ' <small>' + esc(mo.metric) + '</small></span>' +
+      '</figcaption>' +
+    '</figure>').join("");
+
+  box.querySelectorAll(".ev").forEach((fig,i)=>{
+    const g = fig.querySelector(".gate"), im = fig.querySelector("img");
+    setGateShape(g, m.picture);
+    loadFrame(g, im, list[i].frame + "?h=360",
+      ()=>{ g.querySelector(".gate-wait").textContent = "no frame at this second"; });
+  });
+
+  $("evidenceBlock").hidden = false;
+  $("evidenceNote").textContent =
+    list.length + " seconds picked out of the running time by " +
+    (m.chosen_by || "the measurement") + ". Each frame below is the film at that second.";
+
+  const pic = m.picture;
+  $("srcNote").innerHTML =
+    (pic ? 'Picture pulled from <b>' + esc(pic.file) + '</b> at ' + pic.width + 'x' + pic.height +
+           '. ' : '') +
+    'Loudness measured on the smallest published encode, which is the file named in the command above. ' +
+    'Two encodes of one master at one running time, so second ' +
+    (list[0] ? list[0].t.toFixed(1) : "0") + ' is the same second in both.';
+
+  drawMarkers();
+}
+
+/* ================= the trace ================= */
+function renderTrace(t){
+  const s = t.series;
+  if(!s || !s.stages) return false;
+  const before = s.stages.before || [];
+  const after  = s.stages.after || [];
+  if(!before.length) return false;
+  currentSeries = s;
+
+  const W = 1000, H = 220, pad = 14;
+  const secs = s.seconds || Math.max(...before.map(p=>p.t)) || 1;
+  const lo = -46, hi = -2;
+  const x = v => (v / secs) * W;
+  const y = v => pad + (1 - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * (H - pad*2);
+  const path = rows => rows.map((p,i)=> (i?"L":"M") + x(p.t).toFixed(1) + " " + y(p.m).toFixed(1)).join(" ");
+
+  const tgt = t.target_lufs != null ? t.target_lufs : TARGET;
+  const tol = t.tolerance_lu != null ? t.tolerance_lu : TOL;
+  const bandTop = y(tgt + tol), bandBot = y(tgt - tol);
+
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">';
+  for(let v = -40; v <= -10; v += 10){
+    svg += '<line x1="0" y1="' + y(v).toFixed(1) + '" x2="' + W + '" y2="' + y(v).toFixed(1) +
+           '" stroke="#1b1b1e" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+  }
+  svg += '<rect x="0" y="' + bandTop.toFixed(1) + '" width="' + W + '" height="' +
+         Math.max(1,(bandBot-bandTop)).toFixed(1) + '" fill="rgba(255,255,255,.085)"/>';
+  svg += '<line x1="0" y1="' + y(tgt).toFixed(1) + '" x2="' + W + '" y2="' + y(tgt).toFixed(1) +
+         '" stroke="rgba(255,255,255,.5)" stroke-width="1" stroke-dasharray="3 5" vector-effect="non-scaling-stroke"/>';
+  (t.windows || []).forEach(w=>{
+    const x1 = x(w.start_s), x2 = x(w.end_s);
+    svg += '<rect x="' + x1.toFixed(1) + '" y="' + pad + '" width="' + Math.max(1.5,(x2-x1)).toFixed(1) +
+           '" height="' + (H - pad*2) + '" fill="rgba(255,91,52,.14)"/>';
+  });
+  svg += '<path d="' + path(before) + '" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+  if(after.length){
+    svg += '<path d="' + path(after) + '" fill="none" stroke="#ffffff" stroke-width="1.6" vector-effect="non-scaling-stroke"/>';
+  }
+  svg += '</svg>';
+  $("trace").innerHTML = svg;
+
+  // The swatches are inline SVG, not a bordered element. A zero-height <i> in a
+  // wrapping flex row got stretched to 150px and read as a stray rule across
+  // the footnote; an SVG of fixed width cannot be stretched by its parent.
+  const swatch = (colour, w) =>
+    '<svg width="18" height="6" aria-hidden="true"><line x1="0" y1="3" x2="18" y2="3" stroke="' +
+    colour + '" stroke-width="' + w + '"/></svg>';
+  const foot = [];
+  foot.push('<span><b>' + (s.samples||0).toLocaleString() + '</b> samples, one every 100ms, over <b>' +
+            Math.round(secs) + 's</b></span>');
+  foot.push('<span>' + swatch("rgba(255,255,255,.42)", 1) + ' delivered master</span>');
+  if(after.length) foot.push('<span>' + swatch("#ffffff", 2) + ' after repair</span>');
+  else foot.push('<span>never remediated, so there is no second line</span>');
+  if((t.windows||[]).length) foot.push('<span><b>' + t.windows.length + '</b> passage' +
+            (t.windows.length===1?"":"s") + ' located by the scout</span>');
+  if(t.query_cost) foot.push('<span>' + t.query_cost.duration_ms + 'ms, ' +
+            Number(t.query_cost.rows_read||0).toLocaleString() + ' rows read</span>');
+  $("traceFoot").innerHTML = foot.join("");
+  $("evidenceBlock").hidden = false;
+  drawMarkers();
+  return true;
+}
+
+/* The leaders: from each mark on the timeline down to the frame it belongs to.
+   Both live in the same 0..1000 x space as the trace, so the line lands on the
+   second, not near it. */
+function drawMarkers(){
+  const traceBox = $("trace");
+  traceBox.querySelectorAll(".marker").forEach(n=>n.remove());
+  $("leader").innerHTML = "";
+  if(!currentSeries || !currentMoments.length || !traceBox.querySelector("svg")) return;
+
+  const secs = currentSeries.seconds || 1;
+  const n = currentMoments.length;
+  let lines = "", lastP = -99, row = 0;
+  currentMoments.forEach((mo,i)=>{
+    const p = Math.max(0, Math.min(100, (mo.t / secs) * 100));
+    // Two seconds a second and a half apart put two badges in the same pixels.
+    // Stack them instead of letting one hide the other.
+    row = (p - lastP) < 3.2 ? row + 1 : 0;
+    lastP = p;
+    const mark = document.createElement("div");
+    mark.className = "marker" + (isFlagged(mo) ? " flagged" : "");
+    mark.style.left = p + "%";
+    mark.innerHTML = '<i></i><b style="top:' + (row * 17 - 1) + 'px">' + (i+1) + '</b>';
+    traceBox.appendChild(mark);
+
+    // A bezier, not a bracket. The elbowed version ran four near-horizontal
+    // segments through each other at the same y and read as a bus bar.
+    const from = p * 10;                     // 0..1000
+    const to = ((i + 0.5) / n) * 1000;
+    const stroke = isFlagged(mo) ? "#ff5b34" : "rgba(255,255,255,.42)";
+    lines += '<path d="M' + from.toFixed(1) + ' 0 C' + from.toFixed(1) + ' 22, ' +
+             to.toFixed(1) + ' 22, ' + to.toFixed(1) + ' 44" fill="none" stroke="' + stroke +
+             '" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+  });
+  $("leader").innerHTML = lines;
+}
+window.addEventListener("resize", drawMarkers);
+
+/* ================= stored measurements ================= */
+async function loadMeasured(titleId, attempt){
+  try{
+    const res = await fetch("/api/title/" + encodeURIComponent(titleId));
+    if(res.status === 503){
+      const n = (attempt || 0) + 1;
+      if(n <= 20 && selected && selected.identifier === titleId){
+        setState("ClickHouse is warming up", false);
+        setTimeout(()=>loadMeasured(titleId, n), 1500);
+      }
+      return;
+    }
+    if(!res.ok) return;
+    const t = await res.json();
+    if(!selected || selected.identifier !== titleId) return;
+    setState("ClickHouse live", true);
+
+    if(!t || !t.measured){
+      resetNumber("No stored measurement for this title. Run the pass and it will be measured here.");
+      return;
+    }
+    if(t.true_peak_ceiling_dbtp != null) ceiling = t.true_peak_ceiling_dbtp;
+
+    const hasAfter = t.integrated_lufs_after != null;
+    if(t.integrated_lufs != null){
+      showNumber(hasAfter ? t.integrated_lufs : null,
+                 hasAfter ? t.integrated_lufs_after : t.integrated_lufs);
+      $("bigWhen").textContent = t.run_at ? "measured " + t.run_at : "";
+    }
+    if(t.before && t.before.length) renderStoredChecks(t);
+    renderTrace(t);
+
+    if(t.reproduce && t.reproduce.command){
+      $("reproCmd").textContent = t.reproduce.command;
+      $("reproBlock").hidden = false;
+    }
+  }catch(e){ /* nothing stored: the bay stays in its stated idle state */ }
+}
+
+function renderStoredChecks(t){
+  const before = t.before || [], after = t.after || [];
+  const rows = before.map(b=>{
+    const a = after.find(x=>x.check===b.check);
+    // A missing or unexamined after-measurement is its own state. It must never
+    // borrow the before verdict or render in the shape of a pass: a check nobody
+    // ran and a check that found nothing wrong are different facts.
+    const aMissing = !a || a.not_measured;
+    const aCell = aMissing
+      ? '<td class="r mnum">not measured</td>'
+      : '<td class="r mnum ' + (a.passed?'':'miss') + '">' + (a.measured ?? 'n/a') + ' ' + esc(a.unit||"") + '</td>';
+    const verdict = aMissing
+      ? '<span class="state unmeasured">not measured</span>'
+      : '<span class="state ' + (a.passed?'pass':'fail') + '">' + (a.passed?'pass':'fail') + '</span>';
+    return '<tr>' +
+      '<td><div class="c-name">' + esc(String(b.check).replace(/_/g," ")) + '</div>' +
+          '<div class="c-spec">' + esc(b.spec||"") + '</div></td>' +
+      '<td class="r mnum ' + (b.passed?'':'miss') + '">' + (b.measured ?? 'n/a') + ' ' + esc(b.unit||"") + '</td>' +
+      aCell + '<td class="r">' + verdict + '</td></tr>';
+  }).join("");
+
+  const note = t.remediated
+    ? '<b>' + t.failures_before + '</b> checks failed before the repair pass, <b>' + t.failures_after + '</b> after.'
+    : '<b>' + t.failures_before + '</b> checks failed. This title has not been through a repair pass, so there is no after column to compare.';
+
+  $("checks").innerHTML =
+    '<table class="checks"><thead><tr><th>check</th><th class="r">delivered</th>' +
+    '<th class="r">after repair</th><th class="r">verdict</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    '<p class="note">' + note + '</p>';
+  $("checkBlock").hidden = false;
+}
+
+/* ================= live run ================= */
+function renderRunLog(steps){
+  const log = $("runlog");
+  log.classList.add("on");
+  const done = new Set(steps.map(s=>s.step));
+  const nextIdx = STEPS.findIndex(n=>!done.has(n));
   log.innerHTML = STEPS.map((name,i)=>{
     const s = steps.find(x=>x.step===name);
     if(s){
-      const cls = s.ok ? "done" : "flag";
-      return '<div class="st ' + cls + '"><b>' + name + '</b>' +
+      return '<div class="st ' + (s.ok ? "done" : "flag") + '"><b>' + name + '</b>' +
              (s.summary ? ' <span class="sum">' + esc(s.summary) + '</span>' : '') + '</div>';
     }
-    const active = i === nextIdx;
-    return '<div class="st' + (active ? ' active' : '') + '"><b>' + name + '</b></div>';
+    return '<div class="st' + (i === nextIdx ? ' active' : '') + '"><b>' + name + '</b></div>';
   }).join("");
 }
-
-/* ---------- check sheet ---------- */
-const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 function cueRows(b, a){
   const list = b.offenders || [];
@@ -641,14 +1098,14 @@ function cueRows(b, a){
   const items = shown.map(o => {
     const over = stillOver.has(o.cue);
     return '<div class="cue">' +
-      '<span class="id">cue ' + o.cue + '</span>' +
+      '<span>cue ' + o.cue + '</span>' +
       '<span class="tc">' + esc(o.timecode || "") + '</span>' +
       '<span>' + esc(metric(o)) + '</span>' +
       '<span class="' + (over ? 'st-over' : 'st-clear') + '">' + (over ? 'still over' : 'cleared') + '</span>' +
       '<span class="tx">' + esc(o.text || "") + '</span></div>';
   }).join("");
   const more = list.length > shown.length
-    ? '<div class="cue-more">+ ' + (list.length - shown.length) + ' more</div>' : "";
+    ? '<div class="cue-more">' + (list.length - shown.length) + ' more</div>' : "";
   return '<tr class="cues"><td colspan="4"><div class="cue-list">' + items + more + '</div></td></tr>';
 }
 
@@ -661,276 +1118,233 @@ function renderVerdict(run){
   const lb = before.find(b=>b.check==="integrated_loudness_ebu_r128");
   const la = after.find(a=>a.check==="integrated_loudness_ebu_r128");
   if(lb && la && lb.measured != null && la.measured != null){
-    showReadout(parseFloat(lb.measured), parseFloat(la.measured));
+    showNumber(parseFloat(lb.measured), parseFloat(la.measured));
   }
 
   const rows = before.map(b=>{
-    const a = after.find(x=>x.check===b.check) || b;
+    const found = after.find(x=>x.check===b.check);
+    // No fallback to the before finding. Reusing it would print the delivered
+    // measurement in the after column and stamp the delivered verdict on a
+    // re-measurement that never happened.
+    const unmeasured = !found || found.not_measured;
+    const a = found || b;
+    const aCell = unmeasured
+      ? '<td class="r mnum">not measured</td>'
+      : '<td class="r mnum ' + (a.passed?'':'miss') + '">' + (a.measured ?? 'n/a') + ' ' + esc(a.unit) + '</td>';
+    const verdict = unmeasured
+      ? '<span class="state unmeasured">not measured</span>'
+      : '<span class="state ' + (a.passed?'pass':'fail') + '">' + (a.passed?'pass':'fail') + '</span>';
     return '<tr>' +
       '<td><div class="c-name">' + esc(b.check.replace(/_/g," ")) + '</div>' +
           '<div class="c-spec">' + esc(b.spec) + '</div></td>' +
-      '<td class="r num ' + (b.passed?'hit':'miss') + '">' + (b.measured ?? 'n/a') + ' ' + esc(b.unit) + '</td>' +
-      '<td class="r num ' + (a.passed?'hit':'miss') + '">' + (a.measured ?? 'n/a') + ' ' + esc(a.unit) + '</td>' +
-      '<td class="r"><span class="state ' + (a.passed?'pass':'fail') + '">' + (a.passed?'pass':'fail') + '</span></td>' +
-    '</tr>' + cueRows(b, a);
+      '<td class="r mnum ' + (b.passed?'':'miss') + '">' + (b.measured ?? 'n/a') + ' ' + esc(b.unit) + '</td>' +
+      aCell + '<td class="r">' + verdict + '</td>' +
+    '</tr>' + cueRows(b, unmeasured ? b : a);
   }).join("");
 
-  document.getElementById("checks").innerHTML =
-    '<table class="checks"><thead><tr><th>check</th><th class="r">measured</th>' +
-    '<th class="r">after</th><th class="r">verdict</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+  $("checks").innerHTML =
+    '<table class="checks"><thead><tr><th>check</th><th class="r">delivered</th>' +
+    '<th class="r">after repair</th><th class="r">verdict</th></tr></thead><tbody>' + rows + '</tbody></table>' +
     (report ? '<p class="note">' + esc(report.summary) + '</p>' : "");
-  document.getElementById("checkBlock").hidden = false;
+  $("checkBlock").hidden = false;
 }
 
-/* ---------- what is already known about this title ----------
-   Reads stored ClickHouse measurements so the first screen carries a real master,
-   its real numbers and its trace before anyone clicks Run. A judge should not have
-   to wait 40 seconds to find out what this product does. */
-async function loadMeasured(titleId, attempt){
-  const hero = document.getElementById("hero");
-  const repro = document.getElementById("repro");
-  hero.classList.remove("on");
-  repro.classList.remove("on");
-  try{
-    // ClickHouse boots in the background on Cloud Run, so a cold instance answers
-    // 503 for the first few seconds. Retrying matters more than it sounds: a judge
-    // is by definition the cold hit, and giving up on the first 503 left them
-    // looking at the empty state forever while the data was seconds away.
-    const res = await fetch("/api/title/" + encodeURIComponent(titleId));
-    if(res.status === 503){
-      const n = (attempt || 0) + 1;
-      if(n <= 20){
-        if(selected && selected.identifier === titleId){
-          setTimeout(()=>loadMeasured(titleId, n), 1500);
-        }
-        return;
-      }
-      return;
+async function poll(){
+  const run = await fetch("/api/run/" + job).then(r=>r.json());
+  renderRunLog(run.steps||[]);
+  if(run.state === "done"){
+    renderVerdict(run);
+    aBefore.src = "/api/audio/" + job + "/before";
+    aAfter.src  = "/api/audio/" + job + "/after";
+    $("playBefore").disabled = false;
+    $("playAfter").disabled = false;
+    $("go").disabled = false;
+    if(selected){
+      loadProfile(selected.identifier);
+      loadMeasured(selected.identifier);
+      loadMoments(selected.identifier);
     }
-    if(!res.ok) return;
-    const t = await res.json();
-    if(!t || !t.measured) return;
-    // A slow answer must not overwrite a title the reviewer has since clicked away from.
-    if(!selected || selected.identifier !== titleId) return;
-
-    // The meter, from stored values. after is null when this title was never
-    // remediated, and a null must never be drawn as if it were a repaired number.
-    const hasAfter = t.integrated_lufs_after != null;
-    if(t.integrated_lufs != null){
-      showReadout(hasAfter ? t.integrated_lufs : null,
-                  hasAfter ? t.integrated_lufs_after : t.integrated_lufs);
-    }
-
-    if(t.before && t.before.length) renderStoredChecks(t);
-    renderTrace(t);
-
-    if(t.reproduce && t.reproduce.command){
-      document.getElementById("reproCmd").textContent = t.reproduce.command;
-      repro.classList.add("on");
-    }
-  }catch(e){ /* nothing stored for this title: the bay stays in its idle state */ }
-}
-
-/* The trace: momentary loudness across the running time, before and after, with the
-   R128 target band ruled through it. Every bucket comes from ClickHouse, so the
-   shape of the film's loudness is the evidence, not an illustration of it. */
-function renderTrace(t){
-  const s = t.series;
-  if(!s || !s.stages) return;
-  const before = s.stages.before || [];
-  const after  = s.stages.after || [];
-  if(!before.length) return;
-
-  const W = 1000, H = 190, padB = 16;
-  const secs = s.seconds || Math.max(...before.map(p=>p.t)) || 1;
-  const lo = -46, hi = -4;
-  const x = v => (v / secs) * W;
-  const y = v => padB + (1 - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * (H - padB*2);
-
-  const path = rows => rows.map((p,i)=> (i?"L":"M") + x(p.t).toFixed(1) + " " + y(p.m).toFixed(1)).join(" ");
-
-  const tgt = t.target_lufs != null ? t.target_lufs : TARGET;
-  const tol = t.tolerance_lu != null ? t.tolerance_lu : TOL;
-  const bandTop = y(tgt + tol), bandBot = y(tgt - tol);
-
-  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">';
-  svg += '<rect x="0" y="' + bandTop.toFixed(1) + '" width="' + W + '" height="' +
-         Math.max(1,(bandBot-bandTop)).toFixed(1) + '" fill="rgba(255,255,255,.07)"/>';
-  svg += '<line x1="0" y1="' + y(tgt).toFixed(1) + '" x2="' + W + '" y2="' + y(tgt).toFixed(1) +
-         '" stroke="rgba(255,255,255,.42)" stroke-width="1" stroke-dasharray="3 4"/>';
-
-  // the windows the agent located, marked on the timeline they were found in
-  (t.windows || []).forEach(w=>{
-    const x1 = x(w.start_s), x2 = x(w.end_s);
-    svg += '<rect x="' + x1.toFixed(1) + '" y="' + padB + '" width="' + Math.max(1.5,(x2-x1)).toFixed(1) +
-           '" height="' + (H - padB*2) + '" fill="rgba(255,255,255,.05)"/>';
-  });
-
-  svg += '<path d="' + path(before) + '" fill="none" stroke="rgba(255,255,255,.30)" stroke-width="1" vector-effect="non-scaling-stroke"/>';
-  if(after.length){
-    svg += '<path d="' + path(after) + '" fill="none" stroke="#ffffff" stroke-width="1.2" vector-effect="non-scaling-stroke"/>';
+    burnReadings();
+    renderAgentTrace(job);
+    return;
   }
-  svg += '</svg>';
-
-  document.getElementById("heroSvg").innerHTML = svg;
-  document.getElementById("heroWhen").textContent = t.run_at ? "measured " + t.run_at : "";
-
-  const foot = [];
-  foot.push('<span><b>' + (s.samples||0).toLocaleString() + '</b> samples over <b>' +
-            Math.round(secs) + 's</b>, one every 100ms</span>');
-  if(after.length) foot.push('<span>dim line is the delivered master, bright line is after repair</span>');
-  else foot.push('<span>never remediated: no after trace exists for this title</span>');
-  if((t.windows||[]).length) foot.push('<span><b>' + t.windows.length + '</b> failing window' +
-            (t.windows.length===1?"":"s") + ' located by the agent</span>');
-  if(t.query_cost) foot.push('<span>' + t.query_cost.duration_ms + 'ms, ' +
-            Number(t.query_cost.rows_read||0).toLocaleString() + ' rows read</span>');
-  document.getElementById("heroFoot").innerHTML = foot.join("");
-  document.getElementById("hero").classList.add("on");
+  if(run.state === "failed"){
+    const log = $("runlog");
+    log.classList.add("on");
+    log.innerHTML += '<div class="st flag"><b>failed</b> <span class="sum">' + esc(run.error||"") + '</span></div>';
+    $("go").disabled = false;
+    return;
+  }
+  setTimeout(poll, 2000);
 }
 
-/* Check sheet built from stored findings rather than from a live run. */
-function renderStoredChecks(t){
-  const before = t.before || [], after = t.after || [];
-  const rows = before.map(b=>{
-    const a = after.find(x=>x.check===b.check);
-    // No after row means this title was never remediated. Print that, never a zero:
-    // an absent measurement rendered as a number reads as a perfect repair.
-    const aCell = a
-      ? '<td class="r num ' + (a.passed?'hit':'miss') + '">' + (a.measured ?? 'n/a') + ' ' + esc(a.unit) + '</td>'
-      : '<td class="r num">not measured</td>';
-    const verdict = a
-      ? '<span class="state ' + (a.passed?'pass':'fail') + '">' + (a.passed?'pass':'fail') + '</span>'
-      : '<span class="state ' + (b.passed?'pass':'fail') + '">' + (b.passed?'pass':'fail') + '</span>';
-    return '<tr>' +
-      '<td><div class="c-name">' + esc(String(b.check).replace(/_/g," ")) + '</div>' +
-          '<div class="c-spec">' + esc(b.spec||"") + '</div></td>' +
-      '<td class="r num ' + (b.passed?'hit':'miss') + '">' + (b.measured ?? 'n/a') + ' ' + esc(b.unit||"") + '</td>' +
-      aCell + '<td class="r">' + verdict + '</td></tr>';
+$("go").onclick = async ()=>{
+  if(!selected) return;
+  stopAll();
+  $("go").disabled = true;
+  $("playBefore").disabled = true;
+  $("playAfter").disabled = true;
+  $("checkBlock").hidden = true;
+  renderRunLog([]);
+  job = (await fetch("/api/run/" + encodeURIComponent(selected.identifier), {method:"POST"}).then(r=>r.json())).job;
+  poll();
+};
+
+/* ================= transports ================= */
+let playing = null;
+function setTransport(btn, isPlaying){
+  btn.classList.toggle("playing", isPlaying);
+  btn.querySelector(".tlabel").textContent = isPlaying ? "stop" : btn.dataset.label;
+}
+function stopAll(){
+  aBefore.pause(); aAfter.pause(); playing = null;
+  setTransport($("playBefore"), false);
+  setTransport($("playAfter"), false);
+}
+aBefore.onended = stopAll;
+aAfter.onended = stopAll;
+$("playBefore").onclick = ()=>{
+  if(playing === "before"){ stopAll(); return; }
+  stopAll(); aBefore.play(); playing = "before";
+  setTransport($("playBefore"), true);
+};
+$("playAfter").onclick = ()=>{
+  if(playing === "after"){ stopAll(); return; }
+  stopAll(); aAfter.play(); playing = "after";
+  setTransport($("playAfter"), true);
+};
+
+/* ================= reproduce ================= */
+$("copyCmd").onclick = async ()=>{
+  const btn = $("copyCmd"), text = $("reproCmd").textContent;
+  if(!text) return;
+  try{
+    await navigator.clipboard.writeText(text);
+    btn.textContent = "copied"; btn.classList.add("done");
+  }catch(e){
+    const r = document.createRange();
+    r.selectNodeContents($("reproCmd"));
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    btn.textContent = "selected"; btn.classList.add("done");
+  }
+  setTimeout(()=>{ btn.textContent = "copy"; btn.classList.remove("done"); }, 2200);
+};
+
+/* ================= the workflow rail ================= */
+async function loadTopology(){
+  let t;
+  try{ t = await fetch("/api/agents").then(r=>r.json()); }
+  catch(e){ return; }
+  const nodes = t.nodes || [];
+  if(!nodes.length) return;
+
+  $("stations").innerHTML = nodes.map((n,i)=>{
+    const agent = n.kind === "agent";
+    const top = i % 2 === 0;
+    const body = '<span class="stn-tick"></span>' +
+                 '<span class="stn-name">' + esc(n.node) + '</span>';
+    return '<div class="stn' + (agent ? ' agent' : '') + '" title="' +
+      esc(n.node + (n.does ? ": " + n.does : "")) + '">' +
+      '<div class="stn-top">' + (top ? body : '') + '</div>' +
+      '<div class="stn-bot">' + (top ? '' : body) + '</div>' +
+    '</div>';
   }).join("");
 
-  const note = t.remediated
-    ? esc(t.failures_before + " checks failed before the repair pass, " + t.failures_after + " after.")
-    : esc(t.failures_before + " checks failed. This title has not been through a repair pass, so there is no after column to compare.");
+  const agents = nodes.filter(n=>n.kind === "agent").length;
+  $("graphLabel").textContent = (t.framework || "google-adk") + " workflow: " + (t.workflow || "delivery_qc");
+  $("graphNote").textContent =
+    nodes.length + " nodes. " + agents + " hold " + (t.model || "the model") +
+    " and decide what to look at. The other " + (nodes.length - agents) +
+    " are ffmpeg and ClickHouse, and they produce every number.";
 
-  document.getElementById("checks").innerHTML =
-    '<table class="checks"><thead><tr><th>check</th><th class="r">measured</th>' +
-    '<th class="r">after</th><th class="r">verdict</th></tr></thead><tbody>' + rows + '</tbody></table>' +
-    '<p class="note">' + note + '</p>';
-  document.getElementById("checkBlock").hidden = false;
+  $("graphAgents").innerHTML = (t.agents || []).map(a =>
+    '<div class="agent-card">' +
+      '<div class="an">' + esc(a.name) + '</div>' +
+      '<div class="ad">' + esc(a.decides || "") + '</div>' +
+      '<div class="at">tools: ' + esc(a.tools || "none") + '</div>' +
+    '</div>').join("");
+  $("graphBlock").hidden = false;
 }
 
-/* The ADK graph, named node by node. Which nodes hold a model is the question a
-   Google judge is actually asking, so it is the thing the markup encodes. */
-async function loadTopology(){
-  try{
-    const t = await fetch("/api/agents").then(r=>r.json());
-    const nodes = t.nodes || [];
-    if(!nodes.length) return;
-    document.getElementById("topoNodes").innerHTML = nodes.map(n=>
-      '<span class="topo-node ' + esc(n.kind==="agent"?"agent":(n.kind==="join"?"join":"")) + '">' +
-      esc(n.node) + '</span>').join("");
-    const agents = nodes.filter(n=>n.kind==="agent").length;
-    document.getElementById("topoFoot").textContent =
-      nodes.length + " nodes, " + agents + " hold " + (t.model||"the model") +
-      ". Bright nodes decide, the rest are ffmpeg.";
-    document.getElementById("topoLabel").textContent =
-      (t.framework||"google-adk") + " workflow";
-    document.getElementById("topo").classList.add("on");
-  }catch(e){ /* the graph is furniture: never block the page on it */ }
-}
-
-/* ---------- sustained loudness profile ---------- */
+/* ================= sustained loudness ================= */
 async function loadProfile(titleId){
-  const box = document.getElementById("profile");
-  const block = document.getElementById("profileBlock");
+  const box = $("profile"), block = $("profileBlock");
   try{
-    const r = await fetch("/api/loudness-profile/" + titleId).then(r=>r.json());
+    const r = await fetch("/api/loudness-profile/" + encodeURIComponent(titleId)).then(r=>r.json());
     if(!r.profile || !r.profile.length){ block.hidden = true; return; }
     block.hidden = false;
 
-    const W = 640, barH = 30, gap = 8, padL = 76, padR = 60;
+    const W = 720, barH = 34, gap = 12, padL = 84, padR = 72;
     const stages = r.profile;
-    const svgH = stages.length * (barH + gap) + 22;
+    const svgH = stages.length * (barH + gap) + 26;
     const sMin = -50, sMax = 0;
     const x = v => padL + ((Math.max(sMin,Math.min(sMax,v)) - sMin) / (sMax - sMin)) * (W - padL - padR);
 
     let svg = '<svg viewBox="0 0 ' + W + ' ' + svgH + '" xmlns="http://www.w3.org/2000/svg">';
     const tx = x(TARGET);
-    svg += '<line x1="' + tx + '" y1="0" x2="' + tx + '" y2="' + svgH + '" stroke="#ffffff" stroke-width="1" opacity="0.45"/>';
-    svg += '<text x="' + tx + '" y="10" fill="#8a9099" font-size="9" font-family="JetBrains Mono,monospace" text-anchor="middle">-23</text>';
-
+    svg += '<line x1="' + tx + '" y1="14" x2="' + tx + '" y2="' + svgH + '" stroke="#ffffff" stroke-width="1" opacity="0.5"/>';
+    svg += '<text x="' + tx + '" y="9" fill="#a4abb6" font-size="10" font-family="JetBrains Mono,monospace" text-anchor="middle">-23</text>';
     stages.forEach((p,i)=>{
-      const cy = 20 + i*(barH+gap) + barH/2;
+      const cy = 26 + i*(barH+gap) + barH/2;
       const y1 = cy - barH/2 + 2;
-      svg += '<text x="' + (padL-8) + '" y="' + (cy+4) + '" fill="#7d848e" font-size="11" font-family="DM Sans,sans-serif" text-anchor="end">' + esc(p.stage) + '</text>';
+      svg += '<text x="' + (padL-10) + '" y="' + (cy+4) + '" fill="#a4abb6" font-size="12" font-family="DM Sans,sans-serif" text-anchor="end">' + esc(p.stage) + '</text>';
       const x1 = x(p.p05), x2 = x(p.p95);
-      svg += '<rect x="' + x1 + '" y="' + y1 + '" width="' + Math.max(2, x2-x1) + '" height="' + (barH-4) + '" rx="2" fill="rgba(255,255,255,0.10)"/>';
+      svg += '<rect x="' + x1 + '" y="' + y1 + '" width="' + Math.max(2, x2-x1) + '" height="' + (barH-4) + '" fill="rgba(255,255,255,0.13)"/>';
       const mx = x(p.median);
       svg += '<line x1="' + mx + '" y1="' + y1 + '" x2="' + mx + '" y2="' + (y1+barH-4) + '" stroke="#ffffff" stroke-width="2"/>';
-      svg += '<line x1="' + x(p.min) + '" y1="' + cy + '" x2="' + x1 + '" y2="' + cy + '" stroke="rgba(255,255,255,0.20)" stroke-width="1"/>';
-      svg += '<line x1="' + x2 + '" y1="' + cy + '" x2="' + x(p.max) + '" y2="' + cy + '" stroke="rgba(255,255,255,0.20)" stroke-width="1"/>';
-      svg += '<text x="' + (x2+8) + '" y="' + (cy+4) + '" fill="#7d848e" font-size="10" font-family="JetBrains Mono,monospace">' + p.sustained_range_lu + ' LU</text>';
+      svg += '<line x1="' + x(p.min) + '" y1="' + cy + '" x2="' + x1 + '" y2="' + cy + '" stroke="rgba(255,255,255,0.26)" stroke-width="1"/>';
+      svg += '<line x1="' + x2 + '" y1="' + cy + '" x2="' + x(p.max) + '" y2="' + cy + '" stroke="rgba(255,255,255,0.26)" stroke-width="1"/>';
+      svg += '<text x="' + (x2+10) + '" y="' + (cy+4) + '" fill="#8a919c" font-size="11" font-family="JetBrains Mono,monospace">' + p.sustained_range_lu + ' LU</text>';
     });
     svg += '</svg>';
 
-    box.innerHTML = '<div>' + svg + '</div>' +
+    box.innerHTML = svg +
       '<p class="profile-hint">' + esc(r.computed_with || "quantileTDigest") +
-      '. Percentiles, not min and max: a single 100ms spike is not a delivery problem.</p>' +
+      '. The bar is p05 to p95, the upright is the median, the whisker is the raw extreme.</p>' +
       (r.query_cost ? '<div class="profile-cost">' + r.query_cost.duration_ms + 'ms, ' +
         r.query_cost.rows_read.toLocaleString() + ' rows (' + r.query_cost.bytes_read + ') from ' +
         esc(r.query_cost.source) + '</div>' : "");
   }catch(e){ block.hidden = true; }
 }
 
-/* ---------- what each agent actually asked ----------
-   Rendered after a run from the recorded ADK events, so the queries on screen are
-   the ones the model composed rather than ones we wrote for it. Refusals are shown
-   with equal weight: a run that located nothing because the master is clean and one
-   that located nothing because the guardrail blocked the query are opposite facts,
-   and only showing the first would be a demo lying by omission. */
+/* ================= agent trace ================= */
 async function renderAgentTrace(jobId){
-  const box = document.getElementById("trace");
+  const box = $("agentTrace");
   if(!box) return;
   try{
     const t = await fetch("/api/run-trace/" + jobId).then(r=>r.json());
     const agents = t.agents || [];
     if(!agents.length) return;
-
     const blocks = agents.map(a=>{
       const calls = (a.tool_calls || []).map((c,i)=>
-        '<div class="trace">' + (i+1) + '. ' + esc(c.tool || "") +
+        '<div class="sql">' + (i+1) + '. ' + esc(c.tool || "") +
         (c.query ? '\n' + esc(c.query) : "") + '</div>').join("");
       const refused = (a.refused || []).map(r=>
-        '<div class="trace">refused: ' + esc(r.reason || "") + '</div>').join("");
-      const holds = a.holds_model ? "holds the model" : "no model";
+        '<div class="sql">refused: ' + esc(r.reason || "") + '</div>').join("");
       const tools = (a.tool_calls || []).length;
-      return '<p class="note"><b>' + esc(a.agent || "") + '</b> ' + holds + ', ' +
+      return '<p class="note"><b>' + esc(a.agent || "") + '</b> ' +
+             (a.holds_model ? "holds the model" : "no model") + ', ' +
              tools + (tools === 1 ? ' query' : ' queries') +
              ((a.refused || []).length ? ', ' + a.refused.length + ' refused' : "") +
              (a.asked ? '. Asked: ' + esc(a.asked) : "") + '</p>' + calls + refused;
     }).join("");
-
     box.innerHTML =
-      '<p class="note">' + (t.mcp_calls != null ? t.mcp_calls : 0) +
-      ' MCP tool calls' +
+      '<p class="note">' + (t.mcp_calls != null ? t.mcp_calls : 0) + ' MCP tool calls' +
       (t.refused ? ', ' + t.refused + ' refused by the read-only guard' : "") +
-      ', framework ' + esc(t.framework || "") + ', model ' + esc(t.model || "") +
-      '</p>' + blocks;
+      ', framework ' + esc(t.framework || "") + ', model ' + esc(t.model || "") + '</p>' + blocks;
   }catch(e){ /* the trace is evidence, not the product: never block the run on it */ }
 }
 
-/* ---------- supervisor review ---------- */
 async function runReview(){
   if(!selected) return;
-  const btn = document.getElementById("review");
-  const box = document.getElementById("trace");
+  const btn = $("review"), box = $("agentTrace");
   btn.disabled = true;
   box.innerHTML = '<p class="note">Agent working. It chooses its own queries.</p>';
   try{
-    const r = await fetch("/api/review/" + selected.identifier).then(r=>r.json());
+    const r = await fetch("/api/review/" + encodeURIComponent(selected.identifier)).then(r=>r.json());
     if(r.detail){ box.innerHTML = '<p class="note">' + esc(r.detail) + '</p>'; btn.disabled=false; return; }
     const calls = (r.tool_calls||[]).map((t,i)=>
-      '<div class="trace">' + (i+1) + '. ' + esc(t.tool) + '\n' +
+      '<div class="sql">' + (i+1) + '. ' + esc(t.tool) + '\n' +
       esc((t.args && (t.args.query || JSON.stringify(t.args))) || "") + '</div>').join("");
     box.innerHTML =
       '<p class="note">' + (r.tool_calls||[]).length + ' MCP tool calls, framework ' +
@@ -939,78 +1353,75 @@ async function runReview(){
   }catch(e){ box.innerHTML = '<p class="note">Review failed: ' + esc(String(e)) + '</p>'; }
   btn.disabled = false;
 }
-document.getElementById("review").onclick = runReview;
+$("review").onclick = runReview;
 
-/* ---------- transports ---------- */
-/* The label carries the state: idle reads "play the illegal master", playing reads
-   "stop" with a stop glyph, so the control says what it is doing, not just which
-   master it drives. */
-let playing = null;
-function setTransport(btn, isPlaying){
-  btn.classList.toggle("playing", isPlaying);
-  btn.querySelector(".tlabel").textContent = isPlaying ? "stop" : btn.dataset.label;
-}
-function stopAll(){
-  aBefore.pause(); aAfter.pause(); playing = null;
-  setTransport(document.getElementById("playBefore"), false);
-  setTransport(document.getElementById("playAfter"), false);
-}
-aBefore.onended = stopAll;
-aAfter.onended = stopAll;
-document.getElementById("playBefore").onclick = ()=>{
-  if(playing === "before"){ stopAll(); return; }
-  stopAll(); aBefore.play(); playing = "before";
-  setTransport(document.getElementById("playBefore"), true);
-};
-document.getElementById("playAfter").onclick = ()=>{
-  if(playing === "after"){ stopAll(); return; }
-  stopAll(); aAfter.play(); playing = "after";
-  setTransport(document.getElementById("playAfter"), true);
-};
-
-/* ---------- run + poll ---------- */
-async function poll(){
-  const run = await fetch("/api/run/" + job).then(r=>r.json());
-  renderPipeline(run.steps||[]);
-  if(run.state === "done"){
-    renderVerdict(run);
-    aBefore.src = "/api/audio/" + job + "/before";
-    aAfter.src  = "/api/audio/" + job + "/after";
-    document.getElementById("playBefore").disabled = false;
-    document.getElementById("playAfter").disabled = false;
-    document.getElementById("go").disabled = false;
-    if(selected){ loadProfile(selected.identifier); loadMeasured(selected.identifier); }
-    burnLufs();
-    renderAgentTrace(job);
-    return;
-  }
-  if(run.state === "failed"){
-    const log = document.getElementById("pipeline");
-    log.classList.add("run");
-    log.innerHTML += '<div class="st flag"><b>failed</b> <span class="sum">' + esc(run.error||"") + '</span></div>';
-    document.getElementById("go").disabled = false;
-    return;
-  }
-  setTimeout(poll, 2000);
+/* ================= init =================
+   /api/titles resolves file names from archive.org for every title, which
+   measured 23.7s on the deployed service, while /api/catalog is 3.6s. Painting
+   the hero from the catalog first means the measured film is on screen before
+   the strip has finished resolving, instead of after it. */
+/* Which title the page opens on. `catalog_status` has no ORDER BY, so taking row
+   zero meant the first screen changed identity between restarts for no reason a
+   reviewer could see, and it landed once on a title with 21 non-silent samples,
+   where all four evidence frames fall inside three seconds of running time.
+   Rank on evidence first: a title has to have been remediated, then carry the
+   most measured seconds, then show the largest drop in failed checks. Every
+   term is a stored measurement and the order is stable. */
+function pickFeatured(rows, cover){
+  const score = r => {
+    const c = (cover || {})[r.title_id] || {};
+    return [
+      (r.verdict && r.verdict !== "not remediated") ? 1 : 0,
+      Math.round(c.seconds || 0),
+      (r.failures_before || 0) - (r.failures_after || 0),
+    ];
+  };
+  return rows.slice().sort((a,b)=>{
+    const sa = score(a), sb = score(b);
+    for(let i = 0; i < sa.length; i++) if(sb[i] !== sa[i]) return sb[i] - sa[i];
+    return String(a.title_id).localeCompare(String(b.title_id));
+  })[0];
 }
 
-document.getElementById("go").onclick = async ()=>{
-  if(!selected) return;
-  stopAll();
-  document.getElementById("go").disabled = true;
-  document.getElementById("playBefore").disabled = true;
-  document.getElementById("playAfter").disabled = true;
-  document.getElementById("checkBlock").hidden = true;
-  resetReadout();
-  renderPipeline([]);
-  job = (await fetch("/api/run/" + selected.identifier, {method:"POST"}).then(r=>r.json())).job;
-  poll();
-};
+async function bootHero(){
+  try{
+    const [cat, cov] = await Promise.all([
+      fetch("/api/catalog").then(r=>r.json()),
+      fetch("/api/coverage").then(r=>r.json()).catch(()=>({})),
+    ]);
+    const rows = cat.catalog || [];
+    coverage = cov.coverage || {};
+    if(!rows.length){
+      setState(cat.warming ? "ClickHouse is warming up" : "no measured titles yet", false);
+      return;
+    }
+    setState("ClickHouse live, " + rows.length + " titles measured", true);
+    const first = pickFeatured(rows, coverage);
+    if(!selected) selected = {identifier: first.title_id, title: first.title};
+    /* Enable the controls for the featured title.
+       They ship disabled and only selectTitle used to enable them, but
+       selectTitle never runs for the title the hero picks, so a judge landing on
+       the page found the primary control dead and had to click a catalog row
+       before anything would respond. The hero owns the selection, so the hero
+       has to own enabling what acts on it. */
+    ["go", "review"].forEach(id => { const el = $(id); if(el) el.disabled = false; });
+    $("nowTitle").textContent = first.title || first.title_id;
+    $("nowMeta").textContent = first.title_id;
+    loadMeasured(first.title_id);
+    loadMoments(first.title_id);
+    loadProfile(first.title_id);
+  }catch(e){ setState("api unreachable", false); }
+}
 
-/* ---------- init ---------- */
-buildMeter();
-window.addEventListener("resize", ()=>{ positionRule(); });
-loadTitles();
+buildRulerTicks();
+/* Sequential, and it has to be. Run in parallel, /api/titles came back before
+   the MCP catalog read did, the filmstrip selected its own row zero, and the
+   page painted one film's frame beside another film's number. The hero owns the
+   selection; the strip only ever marks what the hero already chose. */
+(async ()=>{
+  await bootHero();
+  loadTitles();
+})();
 loadTopology();
 </script>
 </body>

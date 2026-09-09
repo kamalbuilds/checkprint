@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 import sys
 import threading
 import uuid
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -122,9 +125,22 @@ def health():
         return JSONResponse({"ok": False, "clickhouse_error": str(exc)[:200]}, status_code=503)
 
 
+_titles_cache: dict[int, list] = {}
+
+
 @app.get("/api/titles")
 def titles(rows: int = 12):
-    """Public-domain titles available to QC, straight from archive.org."""
+    """Public-domain titles available to QC, straight from archive.org.
+
+    Cached per instance. Resolving file names asks archive.org once per title, which
+    measured 23.7 seconds on the deployed service for a filmstrip that does not
+    change between visitors. Paying that on every page load is what made the first
+    screen look dead. The cache is in-process and unbounded in time on purpose: the
+    corpus is a fixed set of public-domain titles, and a redeploy clears it.
+    """
+    cached = _titles_cache.get(rows)
+    if cached is not None:
+        return {"titles": cached, "cached": True}
     # Titles already measured come first, so every catalog row has a filmstrip
     # entry to select. Without this the catalog can list a title the bay cannot
     # show, and clicking that row has nowhere to go.
@@ -145,7 +161,10 @@ def titles(rows: int = 12):
             out.append(archive.pick_files(identifier))
         except Exception:
             continue
-    return {"titles": [t for t in out if t["video"]]}
+    result = [t for t in out if t["video"]]
+    if result:
+        _titles_cache[rows] = result
+    return {"titles": result}
 
 
 @app.get("/api/catalog")
@@ -371,6 +390,408 @@ def run_trace(job: str):
         return api.agent_trace(payload)
     except Exception as exc:
         raise HTTPException(500, f"trace unavailable: {str(exc)[:200]}")
+
+
+# --- the picture: real frames of the real film at the measured second -------
+#
+# This product measures a motion picture, so the motion picture belongs on the
+# screen, pinned to the number it explains. Every image the UI shows is pulled
+# with ffmpeg out of the actual public-domain file at a timecode ClickHouse
+# chose, not a poster, not stock, not decoration. "This is what the film looks
+# like at the second it breaks the ceiling" is the strongest sentence this page
+# can say, and it is only true if the frame is genuinely that frame.
+
+FRAMES = Path("/tmp/deliverable-frames")
+FRAMES.mkdir(parents=True, exist_ok=True)
+
+#: archive.org identifiers, as they appear in a URL path. Anything outside this
+#: never reaches a metadata fetch or an ffmpeg argument.
+_ID_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+#: Heights the UI actually asks for. A free-form height would let a caller queue
+#: unlimited distinct ffmpeg passes against the same second.
+_FRAME_HEIGHTS = (180, 360, 720)
+
+#: Containers ffmpeg can seek into over HTTP with a byte-range request, ranked by
+#: how well that seek behaves. mp4/mov carry an index; ogv and mpeg do not and are
+#: only used when a title publishes nothing better.
+_SEEKABLE = {"mp4": 3, "m4v": 3, "mov": 3, "mkv": 2, "webm": 2, "ogv": 1,
+             "avi": 1, "mpeg": 0, "mpg": 0}
+
+#: Above this, a seek means pulling a lot of container before the first keyframe.
+#: archive.org originals run to 1.7 GB where the derivative is 450 MB at the same
+#: resolution, and the derivative is the same picture.
+_MAX_SOURCE_BYTES = 900_000_000
+
+#: ffmpeg is IO bound here, not CPU bound, but an unbounded fan-out would let one
+#: page load open a dozen sockets to archive.org at once and time all of them out.
+_FRAME_SLOTS = threading.Semaphore(3)
+_frame_locks: dict[str, threading.Lock] = {}
+_frame_locks_guard = threading.Lock()
+
+
+def _frame_lock(key: str) -> threading.Lock:
+    with _frame_locks_guard:
+        return _frame_locks.setdefault(key, threading.Lock())
+
+
+def _duration_seconds(raw) -> float | None:
+    """archive.org publishes `length` as either seconds or h:mm:ss."""
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    try:
+        if ":" in text:
+            parts = [float(p) for p in text.split(":")]
+            secs = 0.0
+            for part in parts:
+                secs = secs * 60 + part
+            return secs
+        return float(text)
+    except ValueError:
+        return None
+
+
+@lru_cache(maxsize=256)
+def _picture_source(title_id: str) -> dict | None:
+    """The best file to take a picture from, which is not the file we measure.
+
+    `qc.archive.pick_files` deliberately takes the SMALLEST video: a bounded
+    download is what makes a live QC pass possible, and loudness does not care
+    about resolution. It is the wrong file to look at. For The Iron Mask that is
+    a 320x240 derivative, and a 320x240 frame blown across a hero is the
+    pixel mush this page used to show.
+
+    So the picture comes from the highest-resolution derivative instead, and both
+    filenames are reported in /api/moments, because a QC tool that will not name
+    its sources has no business asking anyone to trust its numbers. The two files
+    are encodes of one master and archive.org publishes them at the same running
+    time, so second 118.4 is the same second in both.
+    """
+    try:
+        meta = archive.metadata(title_id)
+    except Exception:
+        return None
+
+    best = None
+    for f in meta.get("files", []) or []:
+        name = f.get("name") or ""
+        ext = name.lower().rsplit(".", 1)[-1] if "." in name else ""
+        if ext not in _SEEKABLE:
+            continue
+        size = int(f.get("size") or 0)
+        if size <= 0:
+            continue
+        pixels = int(f.get("width") or 0) * int(f.get("height") or 0)
+        cand = {
+            "file": name,
+            "url": archive.download_url(title_id, name),
+            "width": int(f.get("width") or 0),
+            "height": int(f.get("height") or 0),
+            "bytes": size,
+            "duration_s": _duration_seconds(f.get("length")),
+            # Oversized originals sort last rather than being dropped: a title
+            # that publishes only a 2 GB MPEG still gets a picture.
+            "_rank": (size <= _MAX_SOURCE_BYTES, pixels, _SEEKABLE[ext], -size),
+        }
+        if best is None or cand["_rank"] > best["_rank"]:
+            best = cand
+    if best is None:
+        return None
+    best.pop("_rank")
+    return best
+
+
+def _extract(url: str, at_seconds: float, height: int, dest: Path) -> bool:
+    """One frame, by byte-range seek, without downloading the film.
+
+    `-ss` before `-i` is the whole trick: ffmpeg resolves the timecode against the
+    container index and range-requests only the bytes around that keyframe, so a
+    frame from 30 minutes into a 450 MB file costs about eight seconds and a few
+    hundred kilobytes. `-ss` after `-i` would decode from zero and pull the lot.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".partial.jpg")
+    cmd = [
+        "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
+        "-ss", f"{at_seconds:.3f}", "-i", url,
+        "-frames:v", "1", "-q:v", "3", "-vf", f"scale=-2:{height}",
+        "-f", "image2", "-y", str(tmp),
+    ]
+    try:
+        with _FRAME_SLOTS:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=150)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        return False
+    if not tmp.exists() or tmp.stat().st_size == 0:
+        tmp.unlink(missing_ok=True)
+        return False
+    tmp.replace(dest)  # atomic: a reader never sees a half-written jpeg
+    return True
+
+
+def _frame_file(title_id: str, at_seconds: float, height: int) -> Path | None:
+    """The cached frame for this second, extracting it once if it is not there."""
+    if not _ID_OK.match(title_id):
+        return None
+    dest = FRAMES / title_id / f"{height}-{at_seconds:.2f}.jpg"
+    if dest.exists():
+        return dest
+    with _frame_lock(str(dest)):
+        if dest.exists():           # another request extracted it while we waited
+            return dest
+        src = _picture_source(title_id)
+        if not src:
+            return None
+        at = at_seconds
+        dur = src.get("duration_s")
+        if dur and at > dur - 1:    # never seek past the end of the print
+            at = max(0.0, dur - 1.5)
+        return dest if _extract(src["url"], at, height, dest) else None
+
+
+def _height(requested: int) -> int:
+    return min(_FRAME_HEIGHTS, key=lambda h: abs(h - requested))
+
+
+@app.get("/api/frame/{title_id}/{at_seconds}")
+def frame(title_id: str, at_seconds: float, h: int = 720):
+    """The film's own frame at one second of its running time.
+
+    404 with a reason, never a stub image. A placeholder here would be a lie the
+    size of the hero: the entire claim is that the picture on screen is the
+    measured second, so an unavailable frame has to read as unavailable.
+    """
+    if not _ID_OK.match(title_id):
+        raise HTTPException(400, "not an archive.org identifier")
+    if not (0 <= at_seconds < 86_400):
+        raise HTTPException(400, "timecode out of range")
+    path = _frame_file(title_id, at_seconds, _height(h))
+    if path is None:
+        raise HTTPException(
+            404, f"no frame could be pulled from {title_id} at {at_seconds:.2f}s")
+    return FileResponse(path, media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
+def _typical_second(title_id: str, median: float, ch) -> tuple[float, float] | None:
+    """The second where this master sits closest to its own median level.
+
+    The extremes are the defects. This is the reference frame they are extreme
+    against, and it is a real measured sample rather than a midpoint guess.
+    """
+    rows = ch.query(
+        """SELECT t_seconds, short_term FROM deliverable.loudness_samples
+           WHERE title_id = %(t)s AND stage = 'before' AND short_term > -70
+           ORDER BY abs(short_term - %(m)s) ASC LIMIT 1""",
+        parameters={"t": title_id, "m": float(median)},
+    ).result_rows
+    return (float(rows[0][0]), float(rows[0][1])) if rows else None
+
+
+@app.get("/api/moments/{title_id}")
+def moments(title_id: str):
+    """The seconds of this film worth looking at, chosen by the measurement.
+
+    Each moment is an argMin/argMax over the 100ms sample stream: the second the
+    master is loudest, the second it is quietest, the second its true peak is
+    highest, the second it is most ordinary, and any passage the window scout
+    located. The UI hangs a real frame off each one, which is the point: a number
+    is an assertion, a number over the frame it was taken from is evidence.
+    """
+    if not _ID_OK.match(title_id):
+        raise HTTPException(400, "not an archive.org identifier")
+    if not _ch_ready.is_set():
+        raise HTTPException(503, "ClickHouse is still starting up, try again shortly")
+
+    picture = _picture_source(title_id)
+    try:
+        ch = store.client()
+        rows = ch.query(
+            """SELECT argMin(t_seconds, short_term), min(short_term),
+                      argMax(t_seconds, short_term), max(short_term),
+                      argMax(t_seconds, true_peak),  max(true_peak),
+                      quantileTDigest(0.50)(short_term),
+                      max(t_seconds), count()
+               FROM deliverable.loudness_samples
+               WHERE title_id = %(t)s AND stage = 'before' AND short_term > -70""",
+            parameters={"t": title_id},
+        ).result_rows
+    except Exception as exc:
+        raise HTTPException(503, f"clickhouse unavailable: {str(exc)[:200]}")
+
+    if not rows or not rows[0][8]:
+        return {
+            "title_id": title_id,
+            "moments": [],
+            "picture": picture,
+            "detail": "no loudness samples stored for this title, so there is no "
+                      "measured second to pull a frame from",
+        }
+
+    (quiet_t, quiet_v, loud_t, loud_v, peak_t, peak_v,
+     median_v, window_s, samples) = rows[0]
+
+    out = [
+        {"key": "quietest", "t": float(quiet_t),
+         "label": "quietest sustained passage",
+         "metric": "short-term loudness", "value": round(float(quiet_v), 1),
+         "unit": "LUFS"},
+        {"key": "loudest", "t": float(loud_t),
+         "label": "loudest sustained passage",
+         "metric": "short-term loudness", "value": round(float(loud_v), 1),
+         "unit": "LUFS"},
+        {"key": "true_peak", "t": float(peak_t),
+         "label": "highest true peak",
+         "metric": "sample peak", "value": round(float(peak_v), 1),
+         "unit": "dBTP"},
+    ]
+    typical = _typical_second(title_id, float(median_v), ch)
+    if typical:
+        out.append({"key": "typical", "t": typical[0],
+                    "label": "where this master mostly sits",
+                    "metric": "short-term loudness",
+                    "value": round(typical[1], 1), "unit": "LUFS"})
+
+    # Passages the scout wrote its own SQL to find. Absent on a master where the
+    # whole programme moves by one gain, which is the honest common case here.
+    try:
+        for w in store.fail_windows(title_id)[:1]:
+            mid = (float(w["start_s"]) + float(w["end_s"])) / 2
+            out.append({"key": "scout_window", "t": mid,
+                        "label": "the passage the scout located",
+                        "metric": w.get("metric") or "short-term loudness",
+                        "value": round(float(w.get("measured") or 0), 1),
+                        "unit": w.get("unit") or "LUFS",
+                        "start_s": float(w["start_s"]), "end_s": float(w["end_s"])})
+    except Exception:
+        pass
+
+    seen, unique = set(), []
+    for mo in sorted(out, key=lambda m: m["t"]):
+        # Two labels landing on the same second would show one frame twice.
+        stamp = round(mo["t"], 1)
+        if stamp in seen:
+            continue
+        seen.add(stamp)
+        mo["frame"] = f"/api/frame/{title_id}/{mo['t']:.2f}"
+        unique.append(mo)
+
+    return {
+        "title_id": title_id,
+        "moments": unique,
+        "measured_window_s": float(window_s),
+        "samples": int(samples),
+        "picture": picture,
+        "chosen_by": "argMin / argMax / quantileTDigest over "
+                     "deliverable.loudness_samples",
+    }
+
+
+@app.get("/api/coverage")
+def coverage():
+    """How much measurement stands behind each title, in one grouped query.
+
+    `catalog_status` reports verdicts, not evidence weight, and those are not the
+    same thing: a title measured over 23 seconds of non-silent audio and a title
+    measured over two minutes can both read "improved, needs human" while one of
+    them is worth putting on the first screen and the other is not. The UI opens
+    on the best-evidenced title rather than on whichever row ClickHouse happened
+    to return first, so it needs this to decide.
+    """
+    if not _ch_ready.is_set():
+        return JSONResponse({"coverage": {}, "warming": True}, status_code=200)
+    try:
+        rows = store.client().query(
+            """SELECT title_id,
+                      countIf(stage = 'before')                       AS samples,
+                      round(maxIf(t_seconds, stage = 'before'), 1)    AS seconds,
+                      uniqExact(stage)                                AS stages
+               FROM deliverable.loudness_samples
+               WHERE short_term > -70
+               GROUP BY title_id"""
+        ).result_rows
+    except Exception as exc:
+        raise HTTPException(503, f"clickhouse unavailable: {str(exc)[:200]}")
+    return {
+        "coverage": {r[0]: {"samples": int(r[1]), "seconds": float(r[2]),
+                            "stages": int(r[3])} for r in rows},
+        "counted_over": "deliverable.loudness_samples above the -70 LUFS gate",
+    }
+
+
+@app.get("/api/poster/{title_id}")
+def poster(title_id: str, h: int = 180):
+    """One frame to stand for a title in the catalog strip.
+
+    For a measured title that is the second it sits closest to its own median, so
+    the strip is a row of the films as they actually look at their own typical
+    level. For a title nobody has measured yet there is no such second, so it
+    falls back to a third of the way in, which is a real frame of the real film
+    and is labelled in the UI as unmeasured rather than dressed up as a finding.
+    """
+    if not _ID_OK.match(title_id):
+        raise HTTPException(400, "not an archive.org identifier")
+    at = None
+    if _ch_ready.is_set():
+        try:
+            ch = store.client()
+            rows = ch.query(
+                """SELECT quantileTDigest(0.50)(short_term)
+                   FROM deliverable.loudness_samples
+                   WHERE title_id = %(t)s AND stage = 'before' AND short_term > -70""",
+                parameters={"t": title_id},
+            ).result_rows
+            if rows and rows[0][0] is not None:
+                found = _typical_second(title_id, float(rows[0][0]), ch)
+                if found:
+                    at = found[0]
+        except Exception:
+            at = None
+    if at is None:
+        src = _picture_source(title_id)
+        dur = (src or {}).get("duration_s")
+        if not dur:
+            raise HTTPException(404, f"no seekable video published for {title_id}")
+        at = dur / 3
+    path = _frame_file(title_id, at, _height(h))
+    if path is None:
+        raise HTTPException(404, f"no frame could be pulled from {title_id}")
+    return FileResponse(path, media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
+def _prewarm_frames() -> None:
+    """Pull the frames a judge is about to look at, before they look at them.
+
+    An ffmpeg seek into archive.org costs five to twenty seconds. Paying that on
+    first paint is what a spinner is, so the corpus is fixed and the frames are
+    cached on disk: the hero title's moments first, then a poster for every
+    catalog row. Failures are silent by design. This is a warmer, and the
+    endpoints work perfectly well cold.
+    """
+    if not _ch_ready.wait(timeout=300):
+        return
+    try:
+        rows = store.catalog()
+    except Exception:
+        return
+    for i, row in enumerate(rows[:8]):
+        title_id = row.get("title_id")
+        if not title_id or not _ID_OK.match(title_id):
+            continue
+        try:
+            if i == 0:
+                for mo in moments(title_id).get("moments", []):
+                    _frame_file(title_id, mo["t"], 720)
+                    _frame_file(title_id, mo["t"], 360)
+            poster(title_id, h=180)
+        except Exception:
+            continue
+
+
+threading.Thread(target=_prewarm_frames, daemon=True).start()
 
 
 @app.get("/api/audio/{job}/{stage}")

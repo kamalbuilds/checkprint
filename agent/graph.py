@@ -307,10 +307,15 @@ async def _remediate(ctx, workdir: str, video_path: str, subtitle_text: str,
         if "attenuate_windows" in actions else []
 
     if "loudness_normalise" in actions or treated:
+        # The repaired file keeps the source's video stream, copied, so `verify`
+        # re-measures the same checks the first pass measured. Written as an
+        # audio-only .m4a it could not: blackdetect on a file with no frames
+        # reports no black frames, and the after column would show the picture
+        # checks passing on an asset that has no picture.
         result = await asyncio.to_thread(
-            m.remediate_loudness_detailed, video_path, wd / "fixed.m4a",
+            m.remediate_loudness_detailed, video_path, wd / "fixed.mp4",
             m.EBU_R128_TARGET_LUFS, m.TRUE_PEAK_CEILING_DBTP, seconds, treated,
-            peak_threshold_dbtp or None,
+            peak_threshold_dbtp or None, True,
         )
         fixed_video = str(result.path)
         remediation = result.as_dict()
@@ -367,13 +372,23 @@ async def _verify(ctx, identifier: str, title: str, run_id: str, seconds: int,
 
     after = [f.as_dict() for f in report.findings]
     ctx.state["after_findings"] = after
-    before_failures = [f for f in before_findings if not f["passed"]]
-    improved = len(report.failures) < len(before_failures)
+    before_failures = [f for f in before_findings
+                       if not f["passed"] and not f.get("not_measured")]
+
+    # A check the re-measurement did not examine is not evidence of anything, so
+    # it cannot contribute to "improved". The repaired file is muxed with the
+    # source's video precisely so this list stays empty; if it ever fills, the
+    # step says which checks went unexamined rather than counting them as clean.
+    unexamined = [f.check for f in report.not_measured]
+    improved = len(report.failures) < len(before_failures) and not unexamined
     ctx.state["improved"] = improved
 
-    _step(ctx, "verify", improved,
-          f"failures {len(before_failures)} to {len(report.failures)}",
-          {"before": before_findings, "after": after, "improved": improved})
+    summary = f"failures {len(before_failures)} to {len(report.failures)}"
+    if unexamined:
+        summary += f"; NOT MEASURED after the repair: {', '.join(unexamined)}"
+    _step(ctx, "verify", improved, summary,
+          {"before": before_findings, "after": after, "improved": improved,
+           "not_measured": unexamined})
     return {"improved": improved}
 
 
