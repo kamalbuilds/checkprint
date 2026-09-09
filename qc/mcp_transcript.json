@@ -1,12 +1,12 @@
 [
   {
-    "ts": "2026-09-09T17:22:39.617948+00:00",
+    "ts": "2026-09-09T18:48:11.939143+00:00",
     "tool": "run_query",
     "args": {
       "query": "SELECT title_id, title, last_run, failures_before, failures_after, cps_cues_before, cps_cues_after, short_cues_before, short_cues_after, verdict FROM deliverable.catalog_status ORDER BY failures_before DESC"
     },
     "row_count": 7,
-    "result_preview": "{\"columns\": [\"title_id\", \"title\", \"last_run\", \"failures_before\", \"failures_after\", \"cps_cues_before\", \"cps_cues_after\", \"short_cues_before\", \"short_cues_after\", \"verdict\"], \"rows\": [[\"haider-2014_202202\", \"Haider ( 2014)\", \"2026-09-09 14:57:07+05:30\", 6, 4, 214, 113, 18, 14, \"improved, needs human\"], [\"werewolf_in_a_girls_dormitory_ipod\", \"Werewolf in a Girls' Dormitory iPod version\", \"2026-09-09 14:11:40+05:30\", 5, 3, 116, 84, 29, 13, \"improved, needs human\"], [\"isle_of_destiny\", \"Isle of Destiny\", \"2026-09-09 17:59:48+05:30\", 5, 3, 141, 141, 55, 55, \"improved, needs human\"], [\"inner_sanctum\", \"Inner Sanctum\", \"2026-09-09 17:59:59+05:30\", 5, 0, 73, 0, 38, 0, \"not remediated\"], [\"WhileNewYorkSleeps\", \"While New York Sleeps - updated_107\", \"2026-09-09 18:04:54+05:30\", 3, 0, 212, 0, 53, 0, \"not remediated\"], [\"iron_mask\", \"The Iron Mask\", \"2026-09-09 17:57:07+05:30\", 3, 3, 105, 105, 44, 44, \"still failing\"], [\"vicki-1953\", \"Vicki (1953)\", \"2026-09-09 14:44:01+05:30\", 2, 1, 0, 0, 0, 0, \"improved, needs human\"]]}",
+    "result_preview": "{\"columns\": [\"title_id\", \"title\", \"last_run\", \"failures_before\", \"failures_after\", \"cps_cues_before\", \"cps_cues_after\", \"short_cues_before\", \"short_cues_after\", \"verdict\"], \"rows\": [[\"haider-2014_202202\", \"Haider ( 2014)\", \"2026-09-09 14:57:07+05:30\", 6, 4, 214, 113, 18, 14, \"improved, needs human\"], [\"werewolf_in_a_girls_dormitory_ipod\", \"Werewolf in a Girls' Dormitory iPod version\", \"2026-09-09 14:11:40+05:30\", 5, 3, 116, 84, 29, 13, \"improved, needs human\"], [\"isle_of_destiny\", \"Isle of Destiny\", \"2026-09-09 17:59:48+05:30\", 5, 3, 141, 141, 55, 55, \"improved, needs human\"], [\"inner_sanctum\", \"Inner Sanctum\", \"2026-09-09 17:59:59+05:30\", 5, 0, 73, 0, 38, 0, \"not remediated\"], [\"iron_mask\", \"The Iron Mask\", \"2026-09-09 17:57:07+05:30\", 3, 3, 105, 105, 44, 44, \"still failing\"], [\"WhileNewYorkSleeps\", \"While New York Sleeps - updated_107\", \"2026-09-09 18:04:54+05:30\", 3, 0, 212, 0, 53, 0, \"not remediated\"], [\"vicki-1953\", \"Vicki (1953)\", \"2026-09-09 14:44:01+05:30\", 2, 1, 0, 0, 0, 0, \"improved, needs human\"]]}",
     "result_preview_truncated": false
   }
 ]
