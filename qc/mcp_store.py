@@ -36,7 +36,7 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 _CATALOG_SQL = (
-    "SELECT title_id, title, last_run, failures_before, failures_after, verdict "
+    "SELECT title_id, title, last_run, failures_before, failures_after, cps_cues_before, cps_cues_after, short_cues_before, short_cues_after, verdict "
     "FROM deliverable.catalog_status ORDER BY failures_before DESC"
 )
 
@@ -152,7 +152,9 @@ def catalog_via_mcp() -> list[dict]:
     mcp-clickhouse MCP server (stdio transport).
 
     Returns list[dict] with keys:
-        title_id, title, last_run, failures_before, failures_after, verdict
+        title_id, title, last_run, failures_before, failures_after,
+        cps_cues_before, cps_cues_after, short_cues_before, short_cues_after,
+        verdict
     """
     rows, transcript = asyncio.run(_run_catalog_query())
     _TRANSCRIPT_PATH.write_text(json.dumps(transcript, indent=2))

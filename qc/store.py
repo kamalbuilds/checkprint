@@ -143,7 +143,7 @@ def store_run(title_id: str, title: str, stage: str, report, samples: list[tuple
 def catalog(ch=None) -> list[dict]:
     ch = ch or client()
     res = ch.query(
-        "SELECT title_id, title, last_run, failures_before, failures_after, verdict "
+        "SELECT title_id, title, last_run, failures_before, failures_after, cps_cues_before, cps_cues_after, short_cues_before, short_cues_after, verdict "
         "FROM deliverable.catalog_status ORDER BY failures_before DESC"
     )
     return [dict(zip(res.column_names, row)) for row in res.result_rows]

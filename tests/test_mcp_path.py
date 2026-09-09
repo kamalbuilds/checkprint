@@ -28,7 +28,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from qc.mcp_store import _TRANSCRIPT_PATH, catalog_via_mcp
 
-REQUIRED_COLS = {"title_id", "title", "last_run", "failures_before", "failures_after", "verdict"}
+REQUIRED_COLS = {
+    "title_id", "title", "last_run", "failures_before", "failures_after",
+    # Cue counts, not check counts: 42 illegal cues and 1 illegal cue are one
+    # failed check each, and the catalog has to tell them apart.
+    "cps_cues_before", "cps_cues_after", "short_cues_before", "short_cues_after",
+    "verdict",
+}
 
 
 def _parse_rows(result_text: str) -> list:

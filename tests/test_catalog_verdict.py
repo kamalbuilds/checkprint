@@ -120,6 +120,82 @@ def test_the_verdict_column_is_not_constant(ch):
 # --- worst_windows: percentiles over the 100ms sample stream --------------
 
 
+# --- cue counts: the catalog must show the SIZE of the problem -------------
+
+# One run id shared by these titles: catalog_status reads the latest run only, so
+# a title's before and after rows must belong to the same run to appear together.
+_RUN = uuid.uuid4()
+
+
+def _insert_subs(ch, title_id, over_cps, short_cues, stage="before", cue_count=516):
+    """One realistic subtitle finding pair, worded exactly as measure.py writes them."""
+    ch.insert(
+        f"{DB}.findings",
+        [
+            [_RUN, title_id, title_id, stage,
+             "subtitle_reading_speed", "spec",
+             round(100 * over_cps / cue_count, 1), 0.0, "% of cues",
+             1 if over_cps == 0 else 0, 1,
+             f"{over_cps} of {cue_count} cues exceed the reading-speed limit"],
+            [_RUN, title_id, title_id, stage,
+             "subtitle_min_duration", "spec",
+             float(short_cues), 0.0, "cues",
+             1 if short_cues == 0 else 0, 1,
+             f"{short_cues} cues below minimum duration"],
+        ],
+        column_names=["run_id", "title_id", "title", "stage", "check", "spec",
+                      "measured", "target", "unit", "passed", "auto_fixable", "detail"],
+    )
+
+
+def _cues(ch, title_id) -> dict:
+    cols = "cps_cues_before,cps_cues_after,short_cues_before,short_cues_after"
+    rows = ch.query(
+        f"SELECT {cols} FROM {DB}.catalog_status WHERE title_id = %(t)s",
+        parameters={"t": title_id},
+    ).result_rows
+    assert rows, f"no catalog row for {title_id}"
+    return dict(zip(cols.split(","), rows[0]))
+
+
+def test_catalog_reports_cue_counts_not_check_counts(ch):
+    """The bug this column exists for.
+
+    Three cues over the reading-speed limit and two cues under minimum duration
+    are ONE failed check each. If the catalog reports 1 and 1, a title with 42
+    illegal cues is indistinguishable from a title with 1, which is exactly what
+    the old failures_before column did.
+    """
+    _insert_subs(ch, "cues_small", over_cps=3, short_cues=2)
+    got = _cues(ch, "cues_small")
+    assert got["cps_cues_before"] == 3, f"reported check count, not cue count: {got}"
+    assert got["short_cues_before"] == 2, f"reported check count, not cue count: {got}"
+
+
+def test_a_big_offender_outranks_a_small_one(ch):
+    """42 illegal cues must be visibly larger than 1, on the catalog, before drilldown."""
+    _insert_subs(ch, "cues_big", over_cps=42, short_cues=17)
+    _insert_subs(ch, "cues_one", over_cps=1, short_cues=0)
+    big, one = _cues(ch, "cues_big"), _cues(ch, "cues_one")
+    assert big["cps_cues_before"] == 42 and one["cps_cues_before"] == 1
+    assert big["cps_cues_before"] > one["cps_cues_before"]
+
+
+def test_remediation_shrinks_the_cue_counts(ch):
+    """before and after must be separate numbers, or the repair is invisible."""
+    _insert_subs(ch, "cues_fixed", over_cps=20, short_cues=44, stage="before")
+    _insert_subs(ch, "cues_fixed", over_cps=4, short_cues=12, stage="after")
+    got = _cues(ch, "cues_fixed")
+    assert (got["cps_cues_before"], got["cps_cues_after"]) == (20, 4), got
+    assert (got["short_cues_before"], got["short_cues_after"]) == (44, 12), got
+
+
+def test_a_title_with_no_subtitle_findings_reports_zero_not_blank(ch):
+    _insert(ch, "no_subs", before_fail=1, after_fail=0)
+    got = _cues(ch, "no_subs")
+    assert all(v == 0 for v in got.values()), got
+
+
 @pytest.fixture(scope="module")
 def ch_samples(ch):
     """A loudness_samples table plus the worst_windows view, in the test database."""

@@ -558,10 +558,19 @@ async function loadCatalog(){
       <td class="num ${c.failures_before>0?'v-fail':'v-pass'}">${c.failures_before}</td>
       <td style="color:var(--text-dim)">&rarr;</td>
       <td class="num ${c.failures_after>0?'v-fail':'v-pass'}">${c.failures_after}</td>
+      <td class="num ${c.cps_cues_before>0?'v-fail':'v-pass'}">${c.cps_cues_before ?? 0}</td>
+      <td style="color:var(--text-dim)">&rarr;</td>
+      <td class="num ${c.cps_cues_after>0?'v-fail':'v-pass'}">${c.cps_cues_after ?? 0}</td>
+      <td class="num ${c.short_cues_before>0?'v-fail':'v-pass'}">${c.short_cues_before ?? 0}</td>
+      <td style="color:var(--text-dim)">&rarr;</td>
+      <td class="num ${c.short_cues_after>0?'v-fail':'v-pass'}">${c.short_cues_after ?? 0}</td>
       <td class="${c.verdict==='delivery ready'?'v-pass':'v-fail'}">${c.verdict}</td>
     </tr>`).join("");
     box.innerHTML = `<table class="catalog-table">
-      <tr><th>title</th><th>failures</th><th></th><th>after</th><th>verdict</th></tr>
+      <tr><th>title</th><th>failures</th><th></th><th>after</th>
+          <th>cues over cps</th><th></th><th>after</th>
+          <th>cues too short</th><th></th><th>after</th>
+          <th>verdict</th></tr>
       ${rows}</table>
       <p class="hint-text" style="margin-top:8px">Read via ${r.via}</p>`;
   }catch(e){

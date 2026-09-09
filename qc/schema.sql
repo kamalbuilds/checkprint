@@ -54,6 +54,18 @@ ORDER BY (title_id, stage, t_seconds);
 -- work; calling that "still failing" alongside a title nobody touched is both
 -- unhelpful and makes the tool look worse than it is. It is still not "delivery
 -- ready", and we do not claim it is.
+--
+-- failures_* count CHECKS, which is the wrong unit for scanning a catalog: a
+-- title with 42 cues over the reading-speed limit and a title with 1 cue over
+-- both report a single failed check and look identical. The cue counts below are
+-- the size of the problem, parsed out of the finding text the check sheet
+-- already writes ("42 of 516 cues exceed the reading-speed limit"). A title with
+-- no subtitle findings sums to 0, which is the truth, not a blank.
+--
+-- For min-duration, `measured` is already a cue count, so the greater of the two
+-- is taken and the row survives either representation. For reading speed
+-- `measured` is a PERCENTAGE, so only the detail text may be parsed there;
+-- taking a max would report 20.3 cues for a 20.3% failure rate.
 CREATE OR REPLACE VIEW deliverable.catalog_status AS
 SELECT
     title_id,
@@ -61,6 +73,16 @@ SELECT
     max(run_at)                                       AS last_run,
     countIf(passed = 0 AND stage = 'before')          AS failures_before,
     countIf(passed = 0 AND stage = 'after')           AS failures_after,
+    sumIf(toUInt32OrZero(extract(detail, '^(\\d+)')),
+          check = 'subtitle_reading_speed' AND stage = 'before')  AS cps_cues_before,
+    sumIf(toUInt32OrZero(extract(detail, '^(\\d+)')),
+          check = 'subtitle_reading_speed' AND stage = 'after')   AS cps_cues_after,
+    sumIf(greatest(toUInt32OrZero(extract(detail, '^(\\d+)')),
+                   toUInt32(ifNull(measured, 0))),
+          check = 'subtitle_min_duration' AND stage = 'before')   AS short_cues_before,
+    sumIf(greatest(toUInt32OrZero(extract(detail, '^(\\d+)')),
+                   toUInt32(ifNull(measured, 0))),
+          check = 'subtitle_min_duration' AND stage = 'after')    AS short_cues_after,
     multiIf(
         countIf(stage = 'after') = 0,                             'not remediated',
         countIf(passed = 0 AND stage = 'after') = 0,              'delivery ready',
