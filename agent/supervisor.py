@@ -127,14 +127,23 @@ def clickhouse_toolset():
 
 
 def supervisor_agent():
-    """The ADK agent that reviews one master against the catalog."""
+    """The ADK agent that reviews one master against the catalog.
+
+    Carries the same `select_only` guardrail as the graph's agents. The read-only
+    guarantee is a property of every model that holds this toolset or it is not a
+    guarantee: this agent is reachable from the public `/api/review` endpoint, so
+    an unguarded copy of the toolset here would be the widest hole of the three.
+    """
     from google.adk.agents import LlmAgent
+
+    from agent.agents import select_only
 
     return LlmAgent(
         name="qc_supervisor",
         model=MODEL,
         instruction=SUPERVISOR_INSTRUCTION,
         tools=[clickhouse_toolset()],
+        before_tool_callback=select_only,
     )
 
 

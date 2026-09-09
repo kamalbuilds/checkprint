@@ -153,6 +153,131 @@ def test_black_detection_finds_real_black(tmp_path):
     assert not m.structural_findings(measured)[0].passed
 
 
+@pytest.fixture(scope="module")
+def black_with_sound(tmp_path_factory) -> Path:
+    """Ten seconds of genuinely black picture, with a tone over it."""
+    out = tmp_path_factory.mktemp("black") / "black_with_sound.mp4"
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-v", "error", "-y",
+         "-f", "lavfi", "-i", "color=c=black:s=320x240:r=25:d=10",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=10",
+         "-map", "0:v", "-map", "1:a",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(out)],
+        check=True, capture_output=True, timeout=300,
+    )
+    return out
+
+
+def test_a_file_with_no_picture_never_reports_a_passing_picture_check(
+    tmp_path, black_with_sound
+):
+    """The same content, video stripped, must not turn a picture failure into a pass.
+
+    blackdetect and freezedetect on an asset with no video stream emit nothing and
+    exit 0. Reported naively that is "0 black segments", which is written down as a
+    pass: a 0 that means nobody looked, printed identically to a 0 that means
+    nothing was found. This is the case the verify stage hits, because a loudness
+    repair only touches audio.
+    """
+    stripped = tmp_path / "audio_only.m4a"
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-v", "error", "-y", "-i", str(black_with_sound),
+         "-vn", "-c:a", "aac", str(stripped)],
+        check=True, capture_output=True, timeout=300,
+    )
+    assert m.has_video(black_with_sound) is True
+    assert m.has_video(stripped) is False
+
+    with_picture = {f.check: f for f in m.run_qc(black_with_sound).findings}
+    assert with_picture["black_frames"].passed is False, (
+        "the fixture must genuinely fail the picture check, or this proves nothing"
+    )
+
+    report = m.run_qc(stripped)
+    findings = {f.check: f for f in report.findings}
+    for check in m.PICTURE_CHECKS:
+        assert check in findings, f"{check} vanished instead of being marked unexamined"
+        assert findings[check].not_measured is True, check
+        assert findings[check].passed is False, check
+        assert findings[check].measured is None, check
+
+    assert [f.check for f in report.not_measured] == list(m.PICTURE_CHECKS)
+    assert report.passed is False, "a report with an unexamined check is not a pass"
+    # And an unexamined check is not a failure either, so it cannot flatter the
+    # before/after delta by appearing on one side of it.
+    assert not any(f.not_measured for f in report.failures)
+
+
+def test_the_repaired_file_keeps_its_picture_so_verify_can_re_measure_it(
+    tmp_path, black_with_sound
+):
+    """The repaired file carries the picture, so the after pass measures it.
+
+    ffmpeg's default stream selection happens to pick up a video stream, which
+    means this works by accident unless the mapping is explicit. It is asked for
+    explicitly, and copied rather than re-encoded, so the after report covers the
+    same checks as the before report at the cost of a stream copy.
+
+    The delivered file fails black_frames. So must the repaired one: a loudness
+    repair does not remove black frames, and a re-measurement that says otherwise
+    is measuring something else.
+    """
+    repaired = m.remediate_loudness_detailed(
+        black_with_sound, tmp_path / "repaired.mp4", carry_video=True
+    ).path
+    assert m.has_video(repaired) is True
+
+    report = m.run_qc(repaired)
+    findings = {f.check: f for f in report.findings}
+    assert not report.not_measured, [f.check for f in report.not_measured]
+    assert findings["black_frames"].not_measured is False
+    assert findings["black_frames"].passed is False, (
+        "a loudness repair cannot fix black frames, so the re-measurement must "
+        "still report them"
+    )
+    # The picture is copied, not re-encoded. A re-encode at ffmpeg's default
+    # quality is both slow on a feature and a second-generation picture, which is
+    # not what anybody asked a loudness repair to produce.
+    src_v = next(s for s in m.probe(black_with_sound)["streams"]
+                 if s["codec_type"] == "video")
+    out_v = next(s for s in m.probe(repaired)["streams"]
+                 if s["codec_type"] == "video")
+    assert out_v["codec_name"] == src_v["codec_name"]
+    assert out_v["nb_frames"] == src_v["nb_frames"]
+
+
+def test_quieting_ffmpeg_would_blind_the_detector_parser(black_with_sound):
+    """ffmpeg's detectors report at INFO, and `measure_structural` parses stderr.
+
+    blackdetect, freezedetect and silencedetect all write their findings to stderr
+    at log level INFO. Add `-v error` to that command and every finding vanishes
+    while the exit code stays 0, so a file with a real defect measures clean and
+    the picture check can no longer fail. That is a check that cannot fail, which
+    is worse than no check, so the mutation is reproduced here on a file with a
+    known defect rather than left to a comment.
+    """
+    cmd = ["ffmpeg", "-hide_banner", "-nostats", "-i", str(black_with_sound),
+           "-vf", "blackdetect=d=1:pix_th=0.10,freezedetect=n=-60dB:d=2",
+           "-af", "silencedetect=n=-50dB:d=2", "-f", "null", "-"]
+
+    quieted = subprocess.run(cmd[:2] + ["-v", "error"] + cmd[2:],
+                             capture_output=True, text=True, timeout=300)
+    assert quieted.returncode == 0, quieted.stderr[-400:]
+    assert "black_start" not in quieted.stderr, (
+        "this ffmpeg build no longer suppresses detector output at -v error, so "
+        "this test no longer reproduces the bug it exists to pin"
+    )
+
+    shipped = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    assert "black_start" in shipped.stderr
+
+    # And the shipped code path agrees with the shipped command: the defect
+    # reaches a finding, not just ffmpeg's log.
+    measured = m.measure_structural(black_with_sound)
+    assert measured["black_segments"]
+    assert not {f.check: f for f in m.structural_findings(measured)}["black_frames"].passed
+
+
 def test_colour_bars_are_not_flagged_black(tmp_path):
     bars = tmp_path / "bars.mp4"
     subprocess.run(

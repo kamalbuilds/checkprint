@@ -116,14 +116,21 @@ def store_run(title_id: str, title: str, stage: str, report, samples: list[tuple
     ch = ch or client()
     run_id = run_id or uuid.uuid4()
 
-    if report is not None and report.findings:
+    # A check that was not examined gets no row. `passed` is a UInt8 with nowhere
+    # to put "unexamined", and a 0 there would read as a failure while a 1 would
+    # read as a clean picture on an asset with no picture. The report keeps the
+    # unexamined entries and the API serves them; the verdict tables only hold
+    # checks that were actually run.
+    recorded = [f for f in (report.findings if report is not None else [])
+                if not getattr(f, "not_measured", False)]
+    if recorded:
         ch.insert(
             "deliverable.findings",
             [
                 [run_id, title_id, title, stage, f.check, f.spec,
                  f.measured, f.target, f.unit,
                  1 if f.passed else 0, 1 if f.auto_fixable else 0, f.detail]
-                for f in report.findings
+                for f in recorded
             ],
             column_names=["run_id", "title_id", "title", "stage", "check", "spec",
                           "measured", "target", "unit", "passed", "auto_fixable", "detail"],

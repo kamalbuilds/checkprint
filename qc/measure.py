@@ -58,6 +58,11 @@ class Finding:
     passed: bool
     detail: str = ""
     auto_fixable: bool = False
+    #: True when this check was not run against this asset, so `passed` carries no
+    #: information. It exists because the alternative is a 0 that means "nothing
+    #: found" printed identically to a 0 that means "nothing looked", which is the
+    #: same character carrying opposite meanings. Never rendered as a pass.
+    not_measured: bool = False
     # The specific items that failed, e.g. per-cue reading-speed offenders.
     # Empty means nothing failed this check.
     offenders: list[dict] = field(default_factory=list)
@@ -74,17 +79,28 @@ class QCReport:
 
     @property
     def failures(self) -> list[Finding]:
-        return [f for f in self.findings if not f.passed]
+        return [f for f in self.findings if not f.passed and not f.not_measured]
+
+    @property
+    def not_measured(self) -> list[Finding]:
+        """Checks this asset was not examined for. Not failures, and not passes."""
+        return [f for f in self.findings if f.not_measured]
 
     @property
     def passed(self) -> bool:
-        return not self.failures
+        """Nothing failed, and nothing went unexamined.
+
+        A report with an unexamined check is not a clean report. Treating it as one
+        is how "the picture is fine" gets said about a file with no picture in it.
+        """
+        return not self.failures and not self.not_measured
 
     def as_dict(self) -> dict:
         return {
             "source": self.source,
             "duration_seconds": self.duration_seconds,
             "passed": self.passed,
+            "not_measured": [f.check for f in self.not_measured],
             "findings": [f.as_dict() for f in self.findings],
         }
 
@@ -121,6 +137,19 @@ def duration_of(path: str | Path) -> float | None:
 def has_audio(path: str | Path) -> bool:
     try:
         return any(s.get("codec_type") == "audio" for s in probe(path).get("streams", []))
+    except Exception:
+        return False
+
+
+def has_video(path: str | Path) -> bool:
+    """Whether there is a picture here to examine.
+
+    blackdetect and freezedetect on a file with no video stream emit nothing and
+    exit 0, so the picture checks come back with zero events and read as clean. A
+    file with no picture is not a file with a clean picture.
+    """
+    try:
+        return any(s.get("codec_type") == "video" for s in probe(path).get("streams", []))
     except Exception:
         return False
 
@@ -274,6 +303,29 @@ def structural_findings(measured: dict, max_black_seconds: float = 2.0) -> list[
         ),
     ]
     return findings
+
+
+#: The checks that need a picture. Named once so the unexamined form below cannot
+#: drift out of step with the measured form above.
+PICTURE_CHECKS = ("black_frames", "frozen_frames")
+
+
+def picture_not_measured(reason: str) -> list[Finding]:
+    """The picture checks, marked unexamined rather than reported clean."""
+    return [
+        Finding(
+            check=check,
+            spec="delivery spec: picture",
+            measured=None,
+            target=0.0,
+            unit="segments" if check == "black_frames" else "events",
+            passed=False,
+            detail=reason,
+            auto_fixable=False,
+            not_measured=True,
+        )
+        for check in PICTURE_CHECKS
+    ]
 
 
 # --- subtitles ------------------------------------------------------------
@@ -510,6 +562,7 @@ def remediate_loudness_detailed(
     seconds: int | None = None,
     windows: list[dict] | None = None,
     window_ceiling_dbtp: float | None = None,
+    carry_video: bool = False,
 ) -> RemediationResult:
     """Write a loudness-corrected copy. Deterministic: ffmpeg, no model.
 
@@ -526,6 +579,14 @@ def remediate_loudness_detailed(
     only the offending passages first removes that constraint, so pass 2 runs
     LINEAR and the loudness range comes out unchanged. `normalization_type` in the
     result is ffmpeg's own word for which of the two happened.
+
+    `carry_video` copies the source's video stream into the output untouched. A
+    loudness repair changes audio only, so an audio-only output is smaller and
+    faster, and it also means the re-measurement afterwards has no picture to look
+    at: blackdetect on an audio file finds no black frames and the picture checks
+    come back clean on a file that has no frames. Carrying the stream through
+    costs a copy and buys a re-measurement that covers the same checks as the
+    first one.
     """
     src, dst = Path(src), Path(dst)
     # The threshold a WINDOW is judged against is not always the delivery ceiling.
@@ -566,7 +627,10 @@ def remediate_loudness_detailed(
     cmd = ["ffmpeg", "-hide_banner", "-nostats", "-y", "-i", str(src)]
     if seconds:
         cmd += ["-t", str(seconds)]
-    cmd += ["-af", f"{pre},{af}" if pre else af, "-c:a", "aac", "-b:a", "192k", str(dst)]
+    cmd += ["-af", f"{pre},{af}" if pre else af]
+    if carry_video and has_video(src):
+        cmd += ["-map", "0:a:0", "-map", "0:v:0", "-c:v", "copy"]
+    cmd += ["-c:a", "aac", "-b:a", "192k", str(dst)]
     out = _run(cmd)
     if out.returncode != 0:
         raise RuntimeError(f"loudness remediation failed: {out.stderr.strip()[:400]}")
@@ -681,8 +745,17 @@ def run_qc(path: str | Path, subtitle_text: str | None = None,
         loud = measure_loudness(path, seconds=seconds)
         report.findings.extend(loudness_findings(loud))
 
-    structural = measure_structural(path, seconds=seconds)
-    report.findings.extend(structural_findings(structural))
+    # The picture checks are only reported when there is a picture. Run against an
+    # audio-only asset, blackdetect and freezedetect find nothing and exit 0, so
+    # "0 black segments" would be written down as a pass on a file that has no
+    # frames in it at all.
+    if has_video(path):
+        structural = measure_structural(path, seconds=seconds)
+        report.findings.extend(structural_findings(structural))
+    else:
+        report.findings.extend(
+            picture_not_measured("no video stream in this asset")
+        )
 
     if subtitle_text:
         subs = measure_subtitles(subtitle_text)

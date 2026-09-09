@@ -22,11 +22,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qc import measure as m  # noqa: E402
 
 
+#: anoisesrc draws from a PRNG, and without a seed the fixture measures a tenth of
+#: a LU differently on every run, so any figure published from it fails to
+#: reproduce. Pinned, the numbers below are the same on every machine.
+NOISE_SEED = 1953
+
+
 def _build_master(path: Path, target_lufs: float, seconds: int = 20) -> Path:
     """A 1080p / 5.1 / 48 kHz master, mastered to a chosen loudness."""
     subprocess.run(
         ["ffmpeg", "-hide_banner", "-v", "error", "-y",
-         "-f", "lavfi", "-i", f"anoisesrc=color=pink:duration={seconds}:sample_rate=48000",
+         "-f", "lavfi", "-i",
+         f"anoisesrc=color=pink:seed={NOISE_SEED}:duration={seconds}:sample_rate=48000",
          "-f", "lavfi", "-i", f"testsrc2=s=1920x1080:r=25:d={seconds}",
          "-filter_complex",
          "[0:a]pan=5.1|c0=c0|c1=c0|c2=c0|c3=0.3*c0|c4=0.5*c0|c5=0.5*c0,"
@@ -83,6 +90,26 @@ def test_repair_lands_a_modern_master_in_spec(tmp_path, out_of_spec_master):
     assert m.loudness_findings({"integrated_lufs": after})[0].passed, (
         f"repair did not land a modern master in spec: {before} -> {after}"
     )
+
+
+def test_the_published_modern_master_figures_are_the_ones_this_fixture_produces(
+    tmp_path, out_of_spec_master, in_spec_master
+):
+    """Pin the three numbers the docs print for this fixture.
+
+    A figure in a document that the code does not hold is a figure that drifts
+    until somebody checks it and finds it wrong. The seed makes these
+    reproducible; this test makes them load bearing.
+    """
+    before = m.measure_loudness(out_of_spec_master)["integrated_lufs"]
+    after = m.measure_loudness(
+        m.remediate_loudness(out_of_spec_master, tmp_path / "pinned.m4a")
+    )["integrated_lufs"]
+    control = m.measure_loudness(in_spec_master)["integrated_lufs"]
+
+    assert before == pytest.approx(-27.2, abs=0.3), before
+    assert after == pytest.approx(-22.3, abs=0.3), after
+    assert control == pytest.approx(-23.4, abs=0.3), control
 
 
 def test_surround_channels_survive_repair(tmp_path, out_of_spec_master):
