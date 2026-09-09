@@ -174,7 +174,7 @@ number that reaches a verdict.
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q     # 53 passed
+.venv/bin/python -m pytest tests/ -q     # 57 passed
 ```
 
 Every check is tested in **both directions**: it must go red on bad input and green on good

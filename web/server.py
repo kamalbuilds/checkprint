@@ -125,11 +125,24 @@ def health():
 @app.get("/api/titles")
 def titles(rows: int = 12):
     """Public-domain titles available to QC, straight from archive.org."""
-    found = archive.search(rows=rows)
+    # Titles already measured come first, so every catalog row has a filmstrip
+    # entry to select. Without this the catalog can list a title the bay cannot
+    # show, and clicking that row has nowhere to go.
+    measured: list[str] = []
+    try:
+        measured = [c["title_id"] for c in store.catalog()]
+    except Exception:
+        measured = []  # catalog unavailable: fall back to archive.org discovery only
+
+    ids = list(measured)
+    for doc in archive.search(rows=rows):
+        if doc["identifier"] not in ids:
+            ids.append(doc["identifier"])
+
     out = []
-    for doc in found:
+    for identifier in ids:
         try:
-            out.append(archive.pick_files(doc["identifier"]))
+            out.append(archive.pick_files(identifier))
         except Exception:
             continue
     return {"titles": [t for t in out if t["video"]]}

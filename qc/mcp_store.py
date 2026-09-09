@@ -118,11 +118,18 @@ async def _run_catalog_query() -> tuple[list[dict], list[dict]]:
             result = await session.call_tool("run_query", args)
 
             text = _extract_text(result)
+            # Record the parsed row count next to the preview. The preview is
+            # truncated for readability, which makes it invalid JSON, so anything
+            # that tries to re-parse it silently sees zero rows and concludes the
+            # MCP call failed when it actually succeeded.
+            parsed = _parse(text)
             transcript.append({
                 "ts": datetime.now(timezone.utc).isoformat(),
                 "tool": "run_query",
                 "args": args,
+                "row_count": len(parsed),
                 "result_preview": text[:2000],
+                "result_preview_truncated": len(text) > 2000,
             })
 
     rows = _parse(text)

@@ -4,3 +4,5 @@ __pycache__/
 .pytest_cache/
 /tmp/
 .env
+.uicraft-read.json
+mitm_mcp_traffic.db

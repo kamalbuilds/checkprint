@@ -3,665 +3,722 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Checkprint: hit -23</title>
+<title>Checkprint</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
   --ink:#ffffff;
-  --text-secondary:#767d88;
-  --text-muted:#7d848e;
-  --text-dim:#a7a7a7;
+  --slate:#767d88;
+  --mid:#7d848e;
+  --faint:#565b63;
   --canvas:#000000;
   --surface:#030303;
-  --surface-card:#1a1a1a;
-  --border:#27272a;
-  --success:#22c55e;
-  --error:#ef4444;
-  --warn:#f59e0b;
-  --target:#ffffff;
-  --band:rgba(255,255,255,0.06);
+  --scrim:rgba(3,3,3,0.72);
+  --hair:#27272a;
   --sans:'DM Sans',system-ui,-apple-system,sans-serif;
   --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--canvas);color:var(--ink);
-     font:400 16px/1.3 var(--sans);-webkit-font-smoothing:antialiased;
-     letter-spacing:-0.16px;overflow-x:hidden}
+html,body{background:var(--canvas)}
+body{color:var(--ink);font:400 16px/1.35 var(--sans);letter-spacing:-0.16px;
+     -webkit-font-smoothing:antialiased;overflow-x:hidden}
 
-/* ── first viewport: full-bleed split ── */
-.hero{display:grid;grid-template-columns:62fr 38fr;height:100vh;min-height:600px}
-@media(max-width:900px){.hero{grid-template-columns:1fr;height:auto;min-height:0}
-  .hero-still{height:50vh;min-height:320px}.hero-right{min-height:420px}}
+/* ============ FIRST VIEWPORT: the still is the page ============ */
+.frame{position:relative;width:100%;height:100vh;min-height:640px;
+       background:var(--surface);overflow:hidden}
 
-/* LEFT: the still */
-.hero-still{position:relative;overflow:hidden;background:var(--surface)}
-.hero-still img{width:100%;height:100%;object-fit:cover;display:block;opacity:0;
-                transition:opacity .6s ease}
-.hero-still img.loaded{opacity:1}
-.hero-still::after{content:'';position:absolute;inset:0;
-  background:linear-gradient(0deg,rgba(0,0,0,.7) 0%,transparent 40%,transparent 80%,rgba(0,0,0,.3) 100%);
-  pointer-events:none}
-.still-meta{position:absolute;bottom:24px;left:24px;z-index:1}
-.still-title{font-size:20px;font-weight:400;line-height:1.0;letter-spacing:-0.9px;
-             color:var(--ink);max-width:420px}
-.still-id{font:400 11px/1.3 var(--mono);color:var(--text-dim);margin-top:6px;
-           letter-spacing:0}
+/* the film still, full-bleed */
+.still{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+       display:block;opacity:0;transition:opacity .7s ease-out}
+.still.on{opacity:1}
+/* when the still is missing, the bay stays lit, near-black, not broken */
+.frame.blank{background:var(--surface)}
+.blank-note{position:absolute;left:28px;top:50%;transform:translateY(-50%);
+            font:400 12px/1.5 var(--mono);color:var(--faint);letter-spacing:0;
+            max-width:220px;display:none}
+.frame.blank .blank-note{display:block}
 
-/* RIGHT: loudness meter bay */
-.hero-right{padding:32px 28px;display:flex;flex-direction:column;
-            justify-content:center;gap:24px;background:var(--surface);
-            border-left:1px solid var(--border)}
+/* darkening so the meter, readout and captions read on any frame */
+.frame::after{content:'';position:absolute;inset:0;pointer-events:none;
+  background:
+    linear-gradient(90deg, rgba(3,3,3,.62) 0%, rgba(3,3,3,.10) 34%, rgba(3,3,3,.18) 62%, rgba(3,3,3,.80) 100%),
+    linear-gradient(0deg, rgba(3,3,3,.80) 0%, rgba(3,3,3,0) 34%, rgba(3,3,3,0) 74%, rgba(3,3,3,.42) 100%)}
 
-/* loudness meter */
-.meter-wrap{display:flex;gap:20px;align-items:stretch;flex:1;min-height:0;max-height:380px}
-.meter{position:relative;width:72px;flex:none;background:var(--surface-card);
-       border:1px solid var(--border);border-radius:4px;overflow:hidden}
-.meter-scale{position:absolute;inset:0;display:flex;flex-direction:column}
-.meter-target{position:absolute;left:0;right:0;height:1px;background:var(--ink);z-index:2}
-.meter-band{position:absolute;left:0;right:0;background:var(--band);z-index:1}
-.meter-label{position:absolute;right:calc(100% + 6px);font:400 10px/1 var(--mono);
-             color:var(--text-dim);white-space:nowrap;transform:translateY(-50%)}
-.meter-bar{position:absolute;bottom:0;width:50%;transition:height .5s ease;border-radius:2px 2px 0 0}
-.meter-bar.bar-before{left:4px;background:rgba(255,255,255,0.15)}
-.meter-bar.bar-after{right:4px;background:var(--ink)}
-.meter-ticks{position:absolute;right:calc(100% + 2px);top:0;bottom:0}
+/* ---- wordmark, top-left ---- */
+.mark{position:absolute;left:28px;top:24px;z-index:6}
+.mark-name{font:500 15px/1 var(--sans);letter-spacing:-0.4px;color:var(--ink)}
+.mark-sub{font:500 10px/1 var(--sans);text-transform:uppercase;letter-spacing:2px;
+          color:var(--slate);margin-top:7px}
 
-/* LUFS readout */
-.lufs-readout{flex:1;display:flex;flex-direction:column;justify-content:center;gap:8px;
-              min-width:0}
-.lufs-number{font:400 56px/1.0 var(--sans);letter-spacing:-2px;
-             transition:color .3s ease}
-.lufs-pair{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
-.lufs-arrow{color:var(--text-dim);font-size:20px}
-.lufs-unit{font:450 11px/1 var(--sans);text-transform:uppercase;letter-spacing:0.35px;
-           color:var(--text-secondary);margin-top:2px}
-.lufs-spec{font:400 13px/1.3 var(--mono);color:var(--text-dim);margin-top:4px}
-.lufs-empty{font:400 14px/1.4 var(--sans);color:var(--text-muted);max-width:240px}
-.bay-mark{font:400 13px/1.2 var(--sans);color:var(--text-dim);letter-spacing:-0.16px;margin-bottom:20px}
-.bay-mark strong{color:var(--ink);font-weight:500}
+/* ---- the loudness meter, mounted on the right edge ---- */
+.meter{position:absolute;top:0;bottom:0;right:0;width:118px;z-index:5}
+/* the scale layer: everything inside is positioned by bottom:P%, 0 at -40, 100 at 0 */
+.scale{position:absolute;top:40px;bottom:40px;right:0;left:0}
+.meter-track{position:absolute;top:0;bottom:0;right:34px;width:2px;background:var(--hair)}
+/* the two thin bars: illegal (dim) and repaired (bright), rising from the floor.
+   Height is set in pixels from JS: a percentage height resolves to 0 against a
+   parent sized by top/bottom, so the meter is measured and the bars sized in px. */
+.bar{position:absolute;bottom:0;width:6px;height:0;
+     transition:height .6s cubic-bezier(.2,.7,.2,1)}
+.bar-before{right:44px;background:rgba(255,255,255,.24)}
+.bar-after{right:24px;background:var(--ink)}
+/* scale ticks */
+.tick{position:absolute;right:30px;height:1px;background:var(--hair)}
+.tick.major{width:10px}
+.tick.minor{width:5px;background:#1c1c1f}
+.tick-num{position:absolute;right:48px;font:400 10px/1 var(--mono);color:var(--faint);
+          transform:translateY(50%);letter-spacing:0}
 
-/* transport + primary action */
-.controls{display:flex;flex-direction:column;gap:8px}
-.btn{border:0;border-radius:4px;padding:10px 16px;font:500 14px/1 var(--sans);
-     cursor:pointer;transition:background .15s ease,opacity .15s ease;letter-spacing:-0.16px}
-.btn:disabled{opacity:.3;cursor:default}
-.btn-primary{background:var(--ink);color:var(--canvas)}
-.btn-primary:hover:not(:disabled){background:#e0e0e0}
-.btn-transport{background:var(--surface-card);color:var(--text-secondary);
-               border:1px solid var(--border);font-size:13px;padding:8px 14px}
-.btn-transport:hover:not(:disabled){color:var(--ink);border-color:var(--text-dim)}
+/* the one law: the -23 rule, ruled across the film */
+.rule{position:absolute;left:-360px;right:0;height:1px;background:var(--ink);z-index:5}
+.rule-band{position:absolute;left:-360px;right:0;background:rgba(255,255,255,.055);z-index:4}
+.rule-label{position:absolute;right:56px;font:500 10px/1 var(--sans);
+            text-transform:uppercase;letter-spacing:1.4px;color:var(--ink);
+            transform:translateY(50%);white-space:nowrap}
+.rule-tol{position:absolute;right:56px;font:400 10px/1 var(--mono);color:var(--slate);
+          letter-spacing:0;white-space:nowrap}
 
-/* pipeline log (appears during run) */
-.pipeline-log{font:400 12px/1.6 var(--mono);color:var(--text-dim)}
-.pipeline-log .step-done{color:var(--ink)}
-.pipeline-log .step-warn{color:var(--warn)}
-.pipeline-log .step-waiting{color:rgba(255,255,255,0.15)}
+/* ---- the flying integrated readout ---- */
+.readout{position:absolute;right:150px;top:50%;transform:translateY(-50%);z-index:6;
+         text-align:right;transition:top .6s cubic-bezier(.2,.7,.2,1);max-width:60vw}
+.readout.hidden{display:none}
+.read-pair{display:flex;align-items:baseline;justify-content:flex-end;gap:16px;
+           white-space:nowrap}
+.read-before{font:400 34px/1 var(--sans);letter-spacing:-1.4px;color:var(--slate)}
+.read-arrow{color:var(--mid)}
+.read-arrow svg{display:block}
+.read-after{font:400 80px/.9 var(--sans);letter-spacing:-3.6px;color:var(--ink);
+            font-variant-numeric:tabular-nums}
+.read-solo .read-before,.read-solo .read-arrow{display:none}
+.read-unit{font:500 10px/1 var(--sans);text-transform:uppercase;letter-spacing:2px;
+           color:var(--slate);margin-top:10px}
+.read-delta{font:400 13px/1.3 var(--mono);color:var(--slate);margin-top:5px;letter-spacing:0}
+.read-delta.on{color:var(--ink)}
+
+/* the idle hint before any run, pointing at the primary */
+.meter-hint{position:absolute;right:150px;top:50%;transform:translateY(-50%);z-index:6;
+            text-align:right;font:400 13px/1.5 var(--sans);color:var(--slate);
+            max-width:260px}
+.meter-hint b{color:var(--ink);font-weight:500}
+
+/* ---- pipeline log, printed on the still during a run ---- */
+.pipeline{position:absolute;left:28px;top:50%;transform:translateY(-50%);z-index:6;
+          font:400 12px/1.9 var(--mono);letter-spacing:0;display:none}
+.pipeline.run{display:block}
+.pipeline .st{color:var(--faint);transition:color .3s ease-out}
+.pipeline .st b{color:var(--ink);font-weight:400}
+.pipeline .st .sum{color:var(--slate)}
+.pipeline .st.done{color:var(--ink)}
+.pipeline .st.active b::after{content:' ...';color:var(--slate)}
+.pipeline .st.flag b::after{content:' !';color:var(--ink)}
+
+/* ---- controls + title, bottom-left column ---- */
+.deck{position:absolute;left:28px;bottom:26px;z-index:6;display:flex;
+      flex-direction:column;gap:16px;max-width:440px}
+.transport{display:flex;gap:10px}
+.tbtn{appearance:none;border:1px solid var(--hair);background:rgba(3,3,3,.5);
+      color:var(--slate);border-radius:2px;padding:9px 14px;cursor:pointer;
+      font:500 12px/1 var(--sans);letter-spacing:-0.1px;
+      transition:color .15s ease-out,border-color .15s ease-out,background .15s ease-out;
+      display:inline-flex;align-items:center;gap:8px}
+.tbtn:hover:not(:disabled){color:var(--ink);border-color:var(--slate)}
+.tbtn:disabled{opacity:.34;cursor:default}
+.tbtn .ic{width:8px;height:8px;flex:none}
+.tbtn.playing{color:var(--ink);border-color:var(--ink)}
+.primary{appearance:none;border:1px solid var(--ink);background:var(--ink);
+         color:var(--canvas);border-radius:2px;padding:13px 22px;cursor:pointer;
+         font:500 14px/1 var(--sans);letter-spacing:-0.2px;align-self:flex-start;
+         transition:opacity .15s ease-out}
+.primary:hover:not(:disabled){opacity:.86}
+.primary:disabled{opacity:.32;cursor:default}
+.now{border-top:1px solid var(--hair);padding-top:14px}
+.now-title{font:400 20px/1.05 var(--sans);letter-spacing:-0.6px;color:var(--ink);
+           max-width:440px}
+.now-id{font:400 11px/1.3 var(--mono);color:var(--mid);letter-spacing:0;margin-top:6px}
 
 audio{display:none}
 
-/* ── filmstrip rail ── */
-.filmstrip{border-top:1px solid var(--border);background:var(--surface);
-           overflow-x:auto;overflow-y:hidden;white-space:nowrap;padding:12px 24px;
-           scrollbar-width:thin;scrollbar-color:var(--border) transparent;
-           -webkit-overflow-scrolling:touch}
-.filmstrip::-webkit-scrollbar{height:4px}
-.filmstrip::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.film-thumb{display:inline-block;width:140px;margin-right:8px;cursor:pointer;
-            vertical-align:top;opacity:.5;transition:opacity .2s ease;flex:none}
-.film-thumb:hover,.film-thumb.sel{opacity:1}
-.film-thumb.sel{outline:1px solid var(--ink);outline-offset:2px;border-radius:2px}
-.film-thumb img{width:140px;height:80px;object-fit:cover;display:block;border-radius:2px;
-                background:var(--surface-card)}
-.film-thumb-title{font:400 11px/1.3 var(--sans);color:var(--text-dim);
-                  margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:820px){
+  .frame{height:auto;min-height:0}
+  .still{position:relative;height:56vh}
+  .meter{width:84px}
+  .rule,.rule-band{left:20px}
+  .readout,.meter-hint{right:96px;max-width:64vw}
+  .read-after{font-size:56px;letter-spacing:-2.4px}
+  .pipeline{position:static;transform:none;margin:16px 28px 0}
+  .deck{position:static;transform:none;margin:20px 28px 28px;max-width:none}
+}
 
-/* ── below-fold sections ── */
-.sections{max-width:1200px;margin:0 auto;padding:48px 24px}
-.section{margin-bottom:48px}
-.section-label{font:500 14px/1 var(--sans);text-transform:uppercase;
-               letter-spacing:0.35px;color:var(--text-secondary);margin-bottom:16px}
+/* ============ BELOW THE FOLD ============ */
+.sheet{max-width:1080px;margin:0 auto;padding:64px 28px 96px}
+.block{margin-bottom:64px}
+.eyebrow{font:500 11px/1 var(--sans);text-transform:uppercase;letter-spacing:2px;
+         color:var(--slate);margin-bottom:20px}
 
 /* check sheet */
-table{width:100%;border-collapse:collapse;font-size:14px}
-th{text-align:left;color:var(--text-secondary);font-weight:500;padding:8px 8px 8px 0;
-   border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;
-   letter-spacing:0.35px}
-td{padding:8px 8px 8px 0;border-bottom:1px solid var(--border);color:var(--ink);
-   vertical-align:top}
-tr:last-child td{border-bottom:0}
-.num{font-variant-numeric:tabular-nums;font-family:var(--mono)}
-.v-pass{color:var(--success)}
-.v-fail{color:var(--error)}
-.check-name{color:var(--ink);font-size:13px}
-.check-spec{color:var(--text-dim);font-size:11px;font-family:var(--mono)}
-/* the exact cues that failed a check */
-.cues td{padding-top:0;border-bottom:1px solid var(--border)}
-.cue-list{font-family:var(--mono);font-size:11px;line-height:1.7;margin:2px 0 4px}
-.cue-row{display:flex;gap:10px;color:var(--text-secondary)}
-.cue-id{color:var(--text-dim);min-width:52px}
-.cue-time{color:var(--text-dim);min-width:196px}
-.cue-metric{min-width:64px}
-.cue-status{min-width:70px}
-.cue-text{color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cue-more{color:var(--text-dim)}
+.checks{width:100%;border-collapse:collapse;font-size:14px}
+.checks th{text-align:left;font:500 10px/1 var(--sans);text-transform:uppercase;
+           letter-spacing:1.4px;color:var(--slate);padding:0 16px 12px 0;
+           border-bottom:1px solid var(--hair)}
+.checks th.r,.checks td.r{text-align:right}
+.checks td{padding:14px 16px 14px 0;border-bottom:1px solid var(--hair);
+           vertical-align:baseline}
+.checks tr:last-child td{border-bottom:0}
+.c-name{color:var(--ink);font-size:14px;letter-spacing:-0.2px}
+.c-spec{color:var(--mid);font:400 11px/1.3 var(--mono);letter-spacing:0;margin-top:4px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px;letter-spacing:0}
+.num.miss{color:var(--ink)}
+.num.hit{color:var(--slate)}
+.state{font:500 10px/1 var(--sans);text-transform:uppercase;letter-spacing:1.4px}
+.state.fail{color:var(--ink)}
+.state.pass{color:var(--faint)}
+/* offending cues under a failed check */
+.cues td{padding:0 0 14px}
+.cue-list{font-family:var(--mono);font-size:11px;line-height:1.9;letter-spacing:0}
+.cue{display:grid;grid-template-columns:52px 190px 68px 74px 1fr;gap:12px;
+     color:var(--slate);align-items:baseline}
+.cue .id{color:var(--mid)}
+.cue .tc{color:var(--mid)}
+.cue .st-over{color:var(--ink)}
+.cue .st-clear{color:var(--faint)}
+.cue .tx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mid)}
+.cue-more{color:var(--faint);margin-top:4px}
+.note{font:400 14px/1.5 var(--sans);color:var(--slate);margin-top:18px;max-width:72ch}
 
-/* loudness profile SVG */
-.profile-chart{margin-top:8px}
-.profile-chart svg{display:block}
-.profile-cost{font:400 12px/1.4 var(--mono);color:var(--text-dim);margin-top:8px}
+/* sustained loudness */
+.profile svg{display:block;width:100%;max-width:640px}
+.profile-cost{font:400 12px/1.4 var(--mono);color:var(--mid);letter-spacing:0;margin-top:14px}
+.profile-hint{font:400 13px/1.5 var(--sans);color:var(--slate);margin-top:8px;max-width:72ch}
 
-/* catalog */
-.catalog-table td{font-size:13px;padding:6px 8px 6px 0}
-.catalog-table th{font-size:10px;padding:6px 8px 6px 0}
-
-/* supervisor disclosure */
-details{border:1px solid var(--border);border-radius:4px;padding:0}
-details summary{padding:12px 16px;font:500 14px/1 var(--sans);color:var(--text-secondary);
-                cursor:pointer;list-style:none;letter-spacing:-0.16px}
-details summary::-webkit-details-marker{display:none}
-details summary::before{content:'+ ';font-family:var(--mono);color:var(--text-dim)}
-details[open] summary::before{content:'- '}
-details summary:hover{color:var(--ink)}
-.disclosure-body{padding:0 16px 16px;font-size:14px}
-.trace-block{font:400 12px/1.5 var(--mono);color:var(--text-dim);background:var(--surface-card);
-             border:1px solid var(--border);border-radius:4px;padding:12px;
-             overflow-x:auto;white-space:pre;margin-top:8px}
-.note{font-size:14px;color:var(--text-muted);line-height:1.4;margin-top:8px}
-a{color:var(--text-secondary);text-decoration:none}
+/* MCP disclosure */
+.disclose{border-top:1px solid var(--hair)}
+.disclose summary{list-style:none;cursor:pointer;padding:22px 0;
+                  font:500 11px/1 var(--sans);text-transform:uppercase;letter-spacing:2px;
+                  color:var(--slate);transition:color .15s ease-out}
+.disclose summary::-webkit-details-marker{display:none}
+.disclose summary::before{content:'+';font-family:var(--mono);color:var(--mid);
+                          margin-right:12px;display:inline-block;width:10px}
+.disclose[open] summary::before{content:'\2212'}
+.disclose summary:hover{color:var(--ink)}
+.disclose-body{padding:0 0 28px}
+.hint{font:400 14px/1.55 var(--sans);color:var(--slate);max-width:76ch}
+.trace{font:400 12px/1.6 var(--mono);color:var(--slate);letter-spacing:0;
+       border:1px solid var(--hair);border-radius:2px;padding:14px 16px;margin-top:12px;
+       overflow-x:auto;white-space:pre}
+.raw-link{font:400 12px/1 var(--mono);letter-spacing:0;color:var(--mid)}
+a{color:var(--slate);text-decoration:none}
 a:hover{color:var(--ink)}
-.hint-text{font:400 13px/1.4 var(--sans);color:var(--text-dim);max-width:70ch}
-.empty-msg{color:var(--text-dim);font-size:13px}
+.empty{font:400 13px/1.5 var(--sans);color:var(--mid)}
+
+/* ============ FILMSTRIP (the catalog is the strip) ============ */
+.strip{border-top:1px solid var(--hair);background:var(--surface);
+       padding:16px 22px;display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;
+       scrollbar-width:thin;scrollbar-color:var(--hair) transparent}
+.strip::-webkit-scrollbar{height:5px}
+.strip::-webkit-scrollbar-thumb{background:var(--hair);border-radius:2px}
+.cell{flex:none;width:168px;cursor:pointer;opacity:.5;
+      transition:opacity .2s ease-out}
+.cell:hover,.cell.sel{opacity:1}
+.cell-img{position:relative;width:168px;height:94px;border-radius:2px;overflow:hidden;
+          background:#101012}
+.cell.sel .cell-img{outline:1px solid var(--ink);outline-offset:2px}
+.cell-img img{width:100%;height:100%;object-fit:cover;display:block}
+/* the last measured loudness, burned onto the frame */
+.cell-lufs{position:absolute;left:0;bottom:0;right:0;
+           background:linear-gradient(0deg,rgba(3,3,3,.9),rgba(3,3,3,0));
+           font:500 12px/1 var(--mono);letter-spacing:0;color:var(--ink);
+           padding:16px 8px 7px}
+.cell-lufs small{color:var(--slate);font-weight:400}
+.cell-name{font:400 11px/1.3 var(--sans);color:var(--slate);margin-top:7px;
+           white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell.sel .cell-name{color:var(--ink)}
 </style>
 </head>
 <body>
 
-<!-- ════ FIRST VIEWPORT ════ -->
-<div class="hero">
-  <!-- LEFT: film still -->
-  <div class="hero-still" id="still-wrap">
-    <img id="still-img" src="" alt="">
-    <div class="still-meta">
-      <div class="still-title" id="still-title"></div>
-      <div class="still-id" id="still-id"></div>
+<!-- ================= FIRST VIEWPORT ================= -->
+<div class="frame" id="frame">
+  <img class="still" id="still" alt="">
+  <div class="blank-note">still unavailable from archive.org<br>the bay reads from audio, not the frame</div>
+
+  <div class="mark">
+    <div class="mark-name">Checkprint</div>
+    <div class="mark-sub">loudness qc bay</div>
+  </div>
+
+  <!-- the meter, mounted right -->
+  <div class="meter" id="meter">
+    <div class="scale" id="scale">
+      <div class="meter-track"></div>
+      <div class="rule-band" id="ruleBand"></div>
+      <div class="rule" id="rule"></div>
+      <div class="rule-label" id="ruleLabel">-23 LUFS</div>
+      <div class="rule-tol" id="ruleTol">&#177;1 LU</div>
+      <div class="bar bar-before" id="barBefore"></div>
+      <div class="bar bar-after" id="barAfter"></div>
     </div>
   </div>
 
-  <!-- RIGHT: loudness meter bay -->
-  <div class="hero-right">
-    <div class="bay-mark"><strong>Checkprint</strong> Hit -23</div>
-    <div class="meter-wrap">
-      <!-- meter scale -->
-      <div style="position:relative;width:90px;flex:none">
-        <div class="meter" id="meter">
-          <div class="meter-bar bar-before" id="bar-before" style="height:0"></div>
-          <div class="meter-bar bar-after" id="bar-after" style="height:0"></div>
-        </div>
-        <!-- scale labels drawn by JS -->
-      </div>
+  <!-- idle hint before a run -->
+  <div class="meter-hint" id="hint">
+    Nothing measured. Run <b>Measure and repair</b> to read this master against the R128 rule.
+  </div>
 
-      <!-- LUFS readout -->
-      <div class="lufs-readout" id="lufs-readout">
-        <div class="lufs-empty" id="lufs-empty">Not measured yet. Run measure and repair on this master.</div>
-        <div class="lufs-pair" id="lufs-pair" hidden>
-          <span class="lufs-number" id="lufs-before"></span>
-          <span class="lufs-arrow" id="lufs-arrow" hidden>&rarr;</span>
-          <span class="lufs-number" id="lufs-after"></span>
-        </div>
-        <div class="lufs-unit" id="lufs-label" hidden>LUFS integrated</div>
-        <div class="lufs-spec">EBU R128 target: -23 LUFS, +/- 1 LU</div>
-      </div>
+  <!-- flying integrated readout -->
+  <div class="readout hidden" id="readout">
+    <div class="read-pair">
+      <span class="read-before" id="readBefore"></span>
+      <span class="read-arrow" id="readArrow" aria-hidden="true"><svg width="26" height="12" viewBox="0 0 26 12"><path d="M0 6h22M18 2l5 4-5 4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></span>
+      <span class="read-after" id="readAfter"></span>
     </div>
+    <div class="read-unit">integrated lufs</div>
+    <div class="read-delta" id="readDelta"></div>
+  </div>
 
-    <!-- pipeline log (appears inline during a run) -->
-    <div class="pipeline-log" id="pipeline-log"></div>
+  <!-- pipeline log, on the still during a run -->
+  <div class="pipeline" id="pipeline"></div>
 
-    <!-- transport + primary -->
-    <div class="controls">
-      <button class="btn btn-transport" id="play-before" disabled>play the illegal master</button>
-      <button class="btn btn-transport" id="play-after" disabled>play the repaired master</button>
-      <button class="btn btn-primary" id="go" disabled>Measure and repair</button>
+  <!-- controls + current title -->
+  <div class="deck">
+    <div class="transport">
+      <button class="tbtn" id="playBefore" disabled>
+        <svg class="ic" viewBox="0 0 8 8" fill="currentColor"><path d="M0 0l8 4-8 4z"/></svg>
+        illegal master
+      </button>
+      <button class="tbtn" id="playAfter" disabled>
+        <svg class="ic" viewBox="0 0 8 8" fill="currentColor"><path d="M0 0l8 4-8 4z"/></svg>
+        repaired master
+      </button>
+    </div>
+    <button class="primary" id="go" disabled>Measure and repair</button>
+    <div class="now">
+      <h1 class="now-title" id="nowTitle"></h1>
+      <div class="now-id" id="nowId"></div>
     </div>
   </div>
 </div>
 
-<!-- hidden audio elements -->
 <audio id="a-before" preload="none"></audio>
 <audio id="a-after" preload="none"></audio>
 
-<!-- ════ FILMSTRIP RAIL ════ -->
-<div class="filmstrip" id="filmstrip"></div>
+<!-- ================= FILMSTRIP ================= -->
+<div class="strip" id="strip"></div>
 
-<!-- ════ BELOW THE FOLD ════ -->
-<div class="sections">
+<!-- ================= BELOW THE FOLD ================= -->
+<div class="sheet">
 
-  <!-- 1. Check sheet -->
-  <div class="section" id="checksheet-section" hidden>
-    <div class="section-label">Check sheet</div>
-    <div id="checksheet"></div>
+  <div class="block" id="checkBlock" hidden>
+    <div class="eyebrow">Check sheet</div>
+    <div id="checks"></div>
   </div>
 
-  <!-- 2. Sustained loudness profile -->
-  <div class="section" id="profile-section" hidden>
-    <div class="section-label">Sustained loudness</div>
-    <div id="profile"></div>
+  <div class="block" id="profileBlock" hidden>
+    <div class="eyebrow">Sustained loudness</div>
+    <div class="profile" id="profile"></div>
   </div>
 
-  <!-- 3. Catalog -->
-  <div class="section" id="catalog-section">
-    <div class="section-label">Catalog</div>
-    <div id="catalog"><span class="empty-msg">Loading catalog from ClickHouse...</span></div>
-  </div>
-
-  <!-- 4. Supervisor -->
-  <div class="section">
-    <details id="supervisor-details">
+  <div class="block">
+    <details class="disclose">
       <summary>What the agent asked ClickHouse</summary>
-      <div class="disclosure-body">
-        <p class="hint-text">
-          A Google ADK LlmAgent holding the official mcp-clickhouse MCP server as an McpToolset.
-          The queries below were chosen by the agent, not written by us.
-        </p>
-        <button class="btn btn-transport" id="review" disabled style="margin-top:12px">
-          Review this title against the catalog
-        </button>
+      <div class="disclose-body">
+        <p class="hint">A google.adk LlmAgent holds the official mcp-clickhouse server as an
+        McpToolset and chooses its own queries: it lists tables, learns the schema, compares this
+        title against the catalog baseline, then drills into the 100ms samples only when the numbers
+        warrant it. The calls below are the ones it chose.</p>
+        <button class="tbtn" id="review" disabled style="margin-top:16px">Review this title against the catalog</button>
         <div id="trace"></div>
-        <div style="margin-top:12px">
-          <a href="/api/mcp-transcript" style="font-size:12px;font-family:var(--mono)">raw MCP transcript</a>
-        </div>
+        <div style="margin-top:14px"><a class="raw-link" href="/api/mcp-transcript">raw mcp transcript</a></div>
       </div>
     </details>
   </div>
+
 </div>
 
 <script>
-/* ── state ── */
+/* ---------- state ---------- */
 const STEPS = ["ingest","measure","classify","remediate","verify","report"];
-let selected = null, job = null, titles = [];
+const TARGET = -23, TOL = 1, MIN = -40, MAX = 0;
+let selected = null, job = null, titles = [], cellFor = {}, lufsFor = {};
 const aBefore = document.getElementById("a-before");
 const aAfter  = document.getElementById("a-after");
 
-/* ── meter geometry ── */
-const METER_MIN = -40, METER_MAX = 0, TARGET = -23;
-function lufsToPercent(lufs){
-  if(lufs==null) return 0;
-  const clamped = Math.max(METER_MIN, Math.min(METER_MAX, lufs));
-  return ((clamped - METER_MIN) / (METER_MAX - METER_MIN)) * 100;
-}
+/* value -> percent up the scale (0 at MIN, 100 at MAX) */
+const pct = v => Math.max(0, Math.min(100, ((Math.max(MIN,Math.min(MAX,v)) - MIN) / (MAX - MIN)) * 100));
 
-function initMeter(){
-  const meter = document.getElementById("meter");
-  // draw target line at -23
-  const targetPct = lufsToPercent(TARGET);
-  const line = document.createElement("div");
-  line.className = "meter-target";
-  line.style.bottom = targetPct + "%";
-  meter.appendChild(line);
-  // draw +/-1 band
-  const bandLow = lufsToPercent(TARGET - 1);
-  const bandHigh = lufsToPercent(TARGET + 1);
-  const band = document.createElement("div");
-  band.className = "meter-band";
-  band.style.bottom = bandLow + "%";
-  band.style.height = (bandHigh - bandLow) + "%";
-  meter.appendChild(band);
-  // scale labels
-  const wrap = meter.parentElement;
-  [-40,-30,-23,-20,-10,0].forEach(v=>{
-    const pct = lufsToPercent(v);
-    const lbl = document.createElement("div");
-    lbl.className = "meter-label";
-    lbl.style.bottom = pct + "%";
-    lbl.style.left = "calc(100% + 6px)";
-    lbl.textContent = v;
-    lbl.style.position = "absolute";
-    lbl.style.transform = "translateY(50%)";
-    lbl.style.fontSize = v === -23 ? "11px" : "10px";
-    lbl.style.fontWeight = v === -23 ? "500" : "400";
-    lbl.style.color = v === -23 ? "var(--ink)" : "var(--text-dim)";
-    wrap.appendChild(lbl);
-  });
-}
-
-function setMeterBars(beforeLufs, afterLufs){
-  document.getElementById("bar-before").style.height = lufsToPercent(beforeLufs) + "%";
-  document.getElementById("bar-after").style.height = afterLufs != null ? lufsToPercent(afterLufs) + "%" : "0";
-}
-
-function lufsColor(lufs){
-  if(lufs == null) return "var(--text-dim)";
-  if(lufs >= TARGET - 1 && lufs <= TARGET + 1) return "var(--success)";
-  return "var(--error)";
-}
-
-function showLufs(beforeVal, afterVal){
-  const pair = document.getElementById("lufs-pair");
-  const lbl = document.getElementById("lufs-label");
-  const empty = document.getElementById("lufs-empty");
-  const arrow = document.getElementById("lufs-arrow");
-  const bEl = document.getElementById("lufs-before");
-  const aEl = document.getElementById("lufs-after");
-
-  empty.hidden = true;
-  pair.hidden = false;
-  lbl.hidden = false;
-
-  bEl.textContent = beforeVal != null ? beforeVal : "--";
-  bEl.style.color = lufsColor(beforeVal);
-
-  if(afterVal != null){
-    arrow.hidden = false;
-    aEl.textContent = afterVal;
-    aEl.style.color = lufsColor(afterVal);
-    setMeterBars(beforeVal, afterVal);
-  } else {
-    arrow.hidden = true;
-    aEl.textContent = "";
-    setMeterBars(beforeVal, null);
+/* ---------- meter scaffold ---------- */
+/* Everything lives in .scale, whose 0% (bottom) is -40 LUFS and 100% (top) is 0.
+   So a value maps to a plain bottom:P% with no length arithmetic. */
+function buildMeter(){
+  const scale = document.getElementById("scale");
+  for(let v = MIN; v <= MAX; v += 5){
+    const p = pct(v);
+    const major = (v % 10 === 0) || v === TARGET;
+    const t = document.createElement("div");
+    t.className = "tick " + (major ? "major" : "minor");
+    t.style.bottom = p + "%";
+    scale.appendChild(t);
+    if(v % 10 === 0){
+      const n = document.createElement("div");
+      n.className = "tick-num";
+      n.style.bottom = p + "%";
+      n.textContent = v;
+      scale.appendChild(n);
+    }
   }
+  positionRule();
+}
+function positionRule(){
+  const p = pct(TARGET), pLo = pct(TARGET - TOL), pHi = pct(TARGET + TOL);
+  document.getElementById("rule").style.bottom = p + "%";
+  document.getElementById("ruleLabel").style.bottom = p + "%";
+  document.getElementById("ruleTol").style.bottom = "calc(" + p + "% - 15px)";
+  const band = document.getElementById("ruleBand");
+  band.style.bottom = pLo + "%";
+  band.style.height = (pHi - pLo) + "%";
+}
+function setBars(before, after){
+  // Size the bars in pixels from the meter's measured height. A percentage height
+  // resolves to 0 against a parent sized by top/bottom, so measure and scale.
+  const H = document.getElementById("scale").clientHeight;
+  document.getElementById("barBefore").style.height = before==null ? "0" : (pct(before)/100*H) + "px";
+  document.getElementById("barAfter").style.height  = after==null  ? "0" : (pct(after)/100*H)  + "px";
 }
 
-function resetLufs(){
-  document.getElementById("lufs-pair").hidden = true;
-  document.getElementById("lufs-label").hidden = true;
-  document.getElementById("lufs-empty").hidden = false;
-  document.getElementById("lufs-empty").textContent = "Select a title below, then measure and repair.";
-  document.getElementById("bar-before").style.height = "0";
-  document.getElementById("bar-after").style.height = "0";
-  document.getElementById("lufs-arrow").hidden = true;
+/* ---------- the flying readout ---------- */
+function fmt(v){ return (v>0?"+":"") + v.toFixed(1); }
+function showReadout(before, after){
+  const R = document.getElementById("readout");
+  const hint = document.getElementById("hint");
+  hint.style.display = "none";
+  R.classList.remove("hidden");
+
+  const solo = (before == null);
+  R.classList.toggle("read-solo", solo);
+  document.getElementById("readBefore").textContent = solo ? "" : before.toFixed(1);
+  document.getElementById("readAfter").textContent = after.toFixed(1);
+
+  // fly the readout to the after-value height; clamp so it never leaves the frame
+  const p = pct(after);
+  const top = Math.max(14, Math.min(82, 100 - p));
+  R.style.top = top + "% ";
+
+  const off = after - TARGET, onTarget = Math.abs(off) <= TOL;
+  const d = document.getElementById("readDelta");
+  d.classList.toggle("on", onTarget);
+  d.textContent = onTarget ? "on the rule, within " + TOL + " LU"
+                           : fmt(off) + " LU " + (off > 0 ? "over" : "under") + " target";
+  setBars(before, after);
+}
+function resetReadout(){
+  document.getElementById("readout").classList.add("hidden");
+  document.getElementById("hint").style.display = "";
+  setBars(null, null);
 }
 
-/* ── titles / filmstrip ── */
-function selectTitle(t, thumbEl){
+/* ---------- titles / filmstrip ---------- */
+function selectByTitleId(titleId){
+  // Select a film by its archive.org identifier: what a catalog row click does.
+  // Returns {ok, picked} so the caller can distinguish "selected" from "no such
+  // title". It must never fall back to titles[0]: silently selecting the wrong
+  // film would show a judge one title's numbers under another title's name.
+  //
+  // Resolution goes through the `titles` array and the `thumbFor` map rather
+  // than a DOM query, so the same shipped function is exercised by the test
+  // harness under node without a browser.
+  const t = titles.find(x => x.identifier === titleId);
+  if(!t){
+    return {ok:false, picked:null};
+  }
+  const cell = (typeof thumbFor !== "undefined" ? thumbFor : cellFor)[titleId] || null;
+  selectTitle(t, cell);
+  if(cell && cell.scrollIntoView){
+    cell.scrollIntoView({behavior:"smooth", block:"nearest", inline:"center"});
+  }
+  return {ok:true, picked:titleId};
+}
+
+function selectTitle(t, cell){
   selected = t;
-  document.querySelectorAll(".film-thumb").forEach(e=>e.classList.remove("sel"));
-  if(thumbEl) thumbEl.classList.add("sel");
-  // still
-  const img = document.getElementById("still-img");
-  img.classList.remove("loaded");
+  document.querySelectorAll(".cell").forEach(c=>c.classList.remove("sel"));
+  if(cell) cell.classList.add("sel");
+
+  const frame = document.getElementById("frame");
+  const img = document.getElementById("still");
+  frame.classList.remove("blank");
+  img.classList.remove("on");
+  img.onload = ()=>{ frame.classList.remove("blank"); img.classList.add("on"); };
+  // archive.org 302-redirects a missing id to a generic placeholder rather than
+  // returning 404, so onerror fires only on a true network failure. Either way the
+  // meter stays legible over the near-black surface.
+  img.onerror = ()=>{ frame.classList.add("blank"); img.classList.remove("on"); };
   img.src = "https://archive.org/services/img/" + t.identifier;
-  img.onload = ()=> img.classList.add("loaded");
-  document.getElementById("still-title").textContent = t.title;
-  document.getElementById("still-id").textContent = t.identifier;
-  // enable controls
+
+  document.getElementById("nowTitle").textContent = t.title;
+  document.getElementById("nowId").textContent = t.identifier;
+
   document.getElementById("go").disabled = false;
   document.getElementById("review").disabled = false;
-  // load profile
+  document.getElementById("playBefore").disabled = true;
+  document.getElementById("playAfter").disabled = true;
+
+  resetReadout();
+  document.getElementById("pipeline").classList.remove("run");
+  document.getElementById("pipeline").innerHTML = "";
+  document.getElementById("checkBlock").hidden = true;
   loadProfile(t.identifier);
-  // reset meter state for new title
-  resetLufs();
-  document.getElementById("pipeline-log").innerHTML = "";
-  document.getElementById("checksheet-section").hidden = true;
-  document.getElementById("play-before").disabled = true;
-  document.getElementById("play-after").disabled = true;
 }
 
 async function loadTitles(){
   const r = await fetch("/api/titles?rows=8").then(r=>r.json());
-  titles = r.titles;
-  const strip = document.getElementById("filmstrip");
+  titles = r.titles || [];
+  window.__titles = titles;   // let selectByTitleId resolve a catalog row
+  const strip = document.getElementById("strip");
   strip.innerHTML = "";
   titles.forEach((t,i)=>{
-    const thumb = document.createElement("div");
-    thumb.className = "film-thumb";
-    thumb.innerHTML = `<img src="https://archive.org/services/img/${t.identifier}" alt="" loading="lazy">
-      <div class="film-thumb-title">${t.title}</div>`;
-    thumb.onclick = ()=> selectTitle(t, thumb);
-    strip.appendChild(thumb);
-    if(i === 0) selectTitle(t, thumb);
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    cell.dataset.identifier = t.identifier;
+    cell.innerHTML =
+      '<div class="cell-img"><img src="https://archive.org/services/img/' + t.identifier + '" alt="" loading="lazy">' +
+      '<div class="cell-lufs" data-id="' + t.identifier + '" hidden></div></div>' +
+      '<div class="cell-name">' + esc(t.title) + '</div>';
+    cell.onclick = ()=> selectTitle(t, cell);
+    strip.appendChild(cell);
+    cellFor[t.identifier] = cell;
+    if(i === 0) selectTitle(t, cell);
   });
+  burnLufs();
 }
 
-/* ── pipeline rendering ── */
+/* Burn the last measured sustained loudness onto each measured thumb. The catalog
+   view carries verdicts and cue counts but not a loudness figure, so the number
+   comes from the loudness profile (newest stage median short-term), and titles that
+   were never measured simply carry no number rather than a fabricated one. */
+async function burnLufs(){
+  let measured = [];
+  try{
+    const cat = await fetch("/api/catalog").then(r=>r.json());
+    measured = (cat.catalog || []).map(c=>c.title_id);
+  }catch(e){ return; }
+  for(const id of measured){
+    if(!cellFor[id]) continue;
+    try{
+      const r = await fetch("/api/loudness-profile/" + id).then(r=>r.json());
+      const prof = r.profile || [];
+      if(!prof.length) continue;
+      // profile is ordered stage DESC (after before before): first row is newest
+      const row = prof[0];
+      lufsFor[id] = row.median;
+      const el = cellFor[id].querySelector(".cell-lufs");
+      el.innerHTML = row.median.toFixed(1) + " <small>LUFS</small>";
+      el.hidden = false;
+    }catch(e){ /* leave the thumb unburned */ }
+  }
+}
+
+/* ---------- pipeline ---------- */
 function renderPipeline(steps){
-  const log = document.getElementById("pipeline-log");
-  log.innerHTML = STEPS.map(name=>{
-    const done = steps.find(s=>s.step===name);
-    if(done){
-      const cls = done.ok ? "step-done" : "step-warn";
-      return `<div class="${cls}">${name}  ${done.summary || ""}</div>`;
+  const log = document.getElementById("pipeline");
+  log.classList.add("run");
+  const doneNames = new Set(steps.map(s=>s.step));
+  const nextIdx = STEPS.findIndex(n=>!doneNames.has(n));
+  log.innerHTML = STEPS.map((name,i)=>{
+    const s = steps.find(x=>x.step===name);
+    if(s){
+      const cls = s.ok ? "done" : "flag";
+      return '<div class="st ' + cls + '"><b>' + name + '</b>' +
+             (s.summary ? ' <span class="sum">' + esc(s.summary) + '</span>' : '') + '</div>';
     }
-    return `<div class="step-waiting">${name}</div>`;
+    const active = i === nextIdx;
+    return '<div class="st' + (active ? ' active' : '') + '"><b>' + name + '</b></div>';
   }).join("");
 }
 
-/* ── verdict / check sheet ── */
+/* ---------- check sheet ---------- */
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-// The exact items that failed a check, before repair, each marked with whether
-// the repair actually cleared it. An empty "after" list means the check passed.
 function cueRows(b, a){
-  const beforeList = b.offenders || [];
-  if(!beforeList.length) return "";
+  const list = b.offenders || [];
+  if(!list.length) return "";
   const stillOver = new Set((a.offenders || []).map(o => o.cue));
-  const shown = beforeList.slice(0, 6);
+  const shown = list.slice(0, 6);
   const metric = o =>
     o.cps !== undefined ? o.cps + " cps"
     : o.duration !== undefined ? o.duration + "s"
-    : o.longest !== undefined ? o.longest + " ch"
-    : "";
-  const items = shown.map(o => `<div class="cue-row">
-      <span class="cue-id">cue ${o.cue}</span>
-      <span class="cue-time">${esc(o.timecode || "")}</span>
-      <span class="cue-metric v-fail">${esc(metric(o))}</span>
-      <span class="cue-status ${stillOver.has(o.cue)?'v-fail':'v-pass'}">${stillOver.has(o.cue)?"still over":"cleared"}</span>
-      <span class="cue-text">${esc(o.text || "")}</span>
-    </div>`).join("");
-  const more = beforeList.length > shown.length
-    ? `<div class="cue-row cue-more">+ ${beforeList.length - shown.length} more</div>` : "";
-  return `<tr class="cues"><td colspan="4"><div class="cue-list">${items}${more}</div></td></tr>`;
+    : o.longest !== undefined ? o.longest + " ch" : "";
+  const items = shown.map(o => {
+    const over = stillOver.has(o.cue);
+    return '<div class="cue">' +
+      '<span class="id">cue ' + o.cue + '</span>' +
+      '<span class="tc">' + esc(o.timecode || "") + '</span>' +
+      '<span>' + esc(metric(o)) + '</span>' +
+      '<span class="' + (over ? 'st-over' : 'st-clear') + '">' + (over ? 'still over' : 'cleared') + '</span>' +
+      '<span class="tx">' + esc(o.text || "") + '</span></div>';
+  }).join("");
+  const more = list.length > shown.length
+    ? '<div class="cue-more">+ ' + (list.length - shown.length) + ' more</div>' : "";
+  return '<tr class="cues"><td colspan="4"><div class="cue-list">' + items + more + '</div></td></tr>';
 }
 
 function renderVerdict(run){
   const verify = (run.steps||[]).find(s=>s.step==="verify");
   const report = (run.steps||[]).find(s=>s.step==="report");
   if(!verify) return;
-
   const before = verify.data.before, after = verify.data.after;
 
-  // loudness headline
   const lb = before.find(b=>b.check==="integrated_loudness_ebu_r128");
   const la = after.find(a=>a.check==="integrated_loudness_ebu_r128");
-  if(lb && la){
-    showLufs(parseFloat(lb.measured), parseFloat(la.measured));
-  } else {
-    const failsBefore = before.filter(b=>!b.passed).length;
-    const failsAfter = after.filter(a=>!a.passed).length;
-    showLufs(-failsBefore, -failsAfter);
+  if(lb && la && lb.measured != null && la.measured != null){
+    showReadout(parseFloat(lb.measured), parseFloat(la.measured));
   }
 
-  // check sheet table
   const rows = before.map(b=>{
     const a = after.find(x=>x.check===b.check) || b;
-    return `<tr>
-      <td><span class="check-name">${b.check.replace(/_/g," ")}</span><br>
-          <span class="check-spec">${b.spec}</span></td>
-      <td class="num ${b.passed?'v-pass':'v-fail'}">${b.measured ?? "--"} ${b.unit}</td>
-      <td class="num ${a.passed?'v-pass':'v-fail'}">${a.measured ?? "--"} ${a.unit}</td>
-      <td class="${a.passed?'v-pass':'v-fail'}">${a.passed?"pass":"fail"}</td>
-    </tr>${cueRows(b, a)}`;
+    return '<tr>' +
+      '<td><div class="c-name">' + esc(b.check.replace(/_/g," ")) + '</div>' +
+          '<div class="c-spec">' + esc(b.spec) + '</div></td>' +
+      '<td class="r num ' + (b.passed?'hit':'miss') + '">' + (b.measured ?? 'n/a') + ' ' + esc(b.unit) + '</td>' +
+      '<td class="r num ' + (a.passed?'hit':'miss') + '">' + (a.measured ?? 'n/a') + ' ' + esc(a.unit) + '</td>' +
+      '<td class="r"><span class="state ' + (a.passed?'pass':'fail') + '">' + (a.passed?'pass':'fail') + '</span></td>' +
+    '</tr>' + cueRows(b, a);
   }).join("");
 
-  const cs = document.getElementById("checksheet");
-  cs.innerHTML = `<table>
-    <tr><th>check</th><th>measured</th><th>after</th><th></th></tr>${rows}</table>
-    ${report ? `<p class="note">${report.summary}</p>` : ""}`;
-  document.getElementById("checksheet-section").hidden = false;
+  document.getElementById("checks").innerHTML =
+    '<table class="checks"><thead><tr><th>check</th><th class="r">measured</th>' +
+    '<th class="r">after</th><th class="r">verdict</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    (report ? '<p class="note">' + esc(report.summary) + '</p>' : "");
+  document.getElementById("checkBlock").hidden = false;
 }
 
-/* ── loudness profile SVG ── */
+/* ---------- sustained loudness profile ---------- */
 async function loadProfile(titleId){
   const box = document.getElementById("profile");
-  const sec = document.getElementById("profile-section");
+  const block = document.getElementById("profileBlock");
   try{
-    const r = await fetch("/api/loudness-profile/"+titleId).then(r=>r.json());
-    if(!r.profile || !r.profile.length){ sec.hidden = true; return; }
-    sec.hidden = false;
+    const r = await fetch("/api/loudness-profile/" + titleId).then(r=>r.json());
+    if(!r.profile || !r.profile.length){ block.hidden = true; return; }
+    block.hidden = false;
 
-    // draw SVG range bars for each stage
-    const svgW = 600, barH = 28, gap = 4, padL = 70, padR = 20;
+    const W = 640, barH = 30, gap = 8, padL = 76, padR = 60;
     const stages = r.profile;
-    const svgH = stages.length * (barH + gap) + 16;
-    const scaleMin = -50, scaleMax = 0;
-    const x = v => padL + ((v - scaleMin) / (scaleMax - scaleMin)) * (svgW - padL - padR);
+    const svgH = stages.length * (barH + gap) + 22;
+    const sMin = -50, sMax = 0;
+    const x = v => padL + ((Math.max(sMin,Math.min(sMax,v)) - sMin) / (sMax - sMin)) * (W - padL - padR);
 
-    let svg = `<svg viewBox="0 0 ${svgW} ${svgH}" width="100%" style="max-width:${svgW}px" xmlns="http://www.w3.org/2000/svg">`;
-    // target line at -23
-    const tx = x(-23);
-    svg += `<line x1="${tx}" y1="0" x2="${tx}" y2="${svgH}" stroke="#fff" stroke-width="1" opacity="0.3"/>`;
-    svg += `<text x="${tx}" y="10" fill="#767d88" font-size="9" font-family="JetBrains Mono,monospace" text-anchor="middle">-23</text>`;
+    let svg = '<svg viewBox="0 0 ' + W + ' ' + svgH + '" xmlns="http://www.w3.org/2000/svg">';
+    const tx = x(TARGET);
+    svg += '<line x1="' + tx + '" y1="0" x2="' + tx + '" y2="' + svgH + '" stroke="#ffffff" stroke-width="1" opacity="0.45"/>';
+    svg += '<text x="' + tx + '" y="10" fill="#8a9099" font-size="9" font-family="JetBrains Mono,monospace" text-anchor="middle">-23</text>';
 
-    stages.forEach((p, i) => {
-      const cy = 16 + i * (barH + gap) + barH / 2;
-      const y1 = cy - barH / 2 + 2;
-      // label
-      svg += `<text x="${padL - 6}" y="${cy + 4}" fill="#767d88" font-size="11" font-family="DM Sans,sans-serif" text-anchor="end">${p.stage}</text>`;
-      // p05-p95 range bar
+    stages.forEach((p,i)=>{
+      const cy = 20 + i*(barH+gap) + barH/2;
+      const y1 = cy - barH/2 + 2;
+      svg += '<text x="' + (padL-8) + '" y="' + (cy+4) + '" fill="#7d848e" font-size="11" font-family="DM Sans,sans-serif" text-anchor="end">' + esc(p.stage) + '</text>';
       const x1 = x(p.p05), x2 = x(p.p95);
-      svg += `<rect x="${x1}" y="${y1}" width="${Math.max(2, x2 - x1)}" height="${barH - 4}" rx="2" fill="rgba(255,255,255,0.12)"/>`;
-      // median tick
+      svg += '<rect x="' + x1 + '" y="' + y1 + '" width="' + Math.max(2, x2-x1) + '" height="' + (barH-4) + '" rx="2" fill="rgba(255,255,255,0.10)"/>';
       const mx = x(p.median);
-      svg += `<line x1="${mx}" y1="${y1}" x2="${mx}" y2="${y1 + barH - 4}" stroke="#fff" stroke-width="2"/>`;
-      // min/max whiskers
-      const xMin = x(p.min), xMax = x(p.max);
-      svg += `<line x1="${xMin}" y1="${cy}" x2="${x1}" y2="${cy}" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>`;
-      svg += `<line x1="${x2}" y1="${cy}" x2="${xMax}" y2="${cy}" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>`;
-      // value labels
-      svg += `<text x="${x2 + 6}" y="${cy + 4}" fill="#a7a7a7" font-size="10" font-family="JetBrains Mono,monospace">${p.sustained_range_lu} LU range</text>`;
+      svg += '<line x1="' + mx + '" y1="' + y1 + '" x2="' + mx + '" y2="' + (y1+barH-4) + '" stroke="#ffffff" stroke-width="2"/>';
+      svg += '<line x1="' + x(p.min) + '" y1="' + cy + '" x2="' + x1 + '" y2="' + cy + '" stroke="rgba(255,255,255,0.20)" stroke-width="1"/>';
+      svg += '<line x1="' + x2 + '" y1="' + cy + '" x2="' + x(p.max) + '" y2="' + cy + '" stroke="rgba(255,255,255,0.20)" stroke-width="1"/>';
+      svg += '<text x="' + (x2+8) + '" y="' + (cy+4) + '" fill="#7d848e" font-size="10" font-family="JetBrains Mono,monospace">' + p.sustained_range_lu + ' LU</text>';
     });
-    svg += `</svg>`;
+    svg += '</svg>';
 
-    box.innerHTML = `<div class="profile-chart">${svg}</div>
-      <p class="hint-text" style="margin-top:8px">${r.computed_with || "quantileTDigest"}. Percentiles, not min/max: a single 100ms spike is not a delivery problem.</p>
-      ${r.query_cost ? `<div class="profile-cost">${r.query_cost.duration_ms}ms, ${r.query_cost.rows_read.toLocaleString()} rows (${r.query_cost.bytes_read}) from ${r.query_cost.source}</div>` : ""}`;
-  }catch(e){
-    sec.hidden = true;
-  }
+    box.innerHTML = '<div>' + svg + '</div>' +
+      '<p class="profile-hint">' + esc(r.computed_with || "quantileTDigest") +
+      '. Percentiles, not min and max: a single 100ms spike is not a delivery problem.</p>' +
+      (r.query_cost ? '<div class="profile-cost">' + r.query_cost.duration_ms + 'ms, ' +
+        r.query_cost.rows_read.toLocaleString() + ' rows (' + r.query_cost.bytes_read + ') from ' +
+        esc(r.query_cost.source) + '</div>' : "");
+  }catch(e){ block.hidden = true; }
 }
 
-/* ── catalog ── */
-async function loadCatalog(){
-  const box = document.getElementById("catalog");
-  try{
-    const r = await fetch("/api/catalog").then(r=>r.json());
-    if(r.warming){
-      box.innerHTML = '<span class="empty-msg">ClickHouse is starting...</span>';
-      return setTimeout(loadCatalog, 4000);
-    }
-    if(!r.catalog || !r.catalog.length){
-      box.innerHTML = '<span class="empty-msg">No titles measured yet. Run a QC pass above.</span>';
-      return;
-    }
-    const rows = r.catalog.map(c=>`<tr>
-      <td>${c.title}</td>
-      <td class="num ${c.failures_before>0?'v-fail':'v-pass'}">${c.failures_before}</td>
-      <td style="color:var(--text-dim)">&rarr;</td>
-      <td class="num ${c.failures_after>0?'v-fail':'v-pass'}">${c.failures_after}</td>
-      <td class="num ${c.cps_cues_before>0?'v-fail':'v-pass'}">${c.cps_cues_before ?? 0}</td>
-      <td style="color:var(--text-dim)">&rarr;</td>
-      <td class="num ${c.cps_cues_after>0?'v-fail':'v-pass'}">${c.cps_cues_after ?? 0}</td>
-      <td class="num ${c.short_cues_before>0?'v-fail':'v-pass'}">${c.short_cues_before ?? 0}</td>
-      <td style="color:var(--text-dim)">&rarr;</td>
-      <td class="num ${c.short_cues_after>0?'v-fail':'v-pass'}">${c.short_cues_after ?? 0}</td>
-      <td class="${c.verdict==='delivery ready'?'v-pass':'v-fail'}">${c.verdict}</td>
-    </tr>`).join("");
-    box.innerHTML = `<table class="catalog-table">
-      <tr><th>title</th><th>failures</th><th></th><th>after</th>
-          <th>cues over cps</th><th></th><th>after</th>
-          <th>cues too short</th><th></th><th>after</th>
-          <th>verdict</th></tr>
-      ${rows}</table>
-      <p class="hint-text" style="margin-top:8px">Read via ${r.via}</p>`;
-  }catch(e){
-    box.innerHTML = '<span class="empty-msg">Catalog unavailable.</span>';
-  }
-}
-
-/* ── supervisor review ── */
+/* ---------- supervisor review ---------- */
 async function runReview(){
   if(!selected) return;
   const btn = document.getElementById("review");
   const box = document.getElementById("trace");
   btn.disabled = true;
-  box.innerHTML = '<p class="note">Agent working... it chooses its own queries.</p>';
+  box.innerHTML = '<p class="note">Agent working. It chooses its own queries.</p>';
   try{
-    const r = await fetch("/api/review/"+selected.identifier).then(r=>r.json());
-    if(r.detail){ box.innerHTML = `<p class="note">${r.detail}</p>`; btn.disabled=false; return; }
+    const r = await fetch("/api/review/" + selected.identifier).then(r=>r.json());
+    if(r.detail){ box.innerHTML = '<p class="note">' + esc(r.detail) + '</p>'; btn.disabled=false; return; }
     const calls = (r.tool_calls||[]).map((t,i)=>
-      `<div class="trace-block">${i+1}. ${t.tool}\n${(t.args && (t.args.query || JSON.stringify(t.args))) || ""}</div>`).join("");
-    box.innerHTML = `
-      <p class="note" style="margin-top:12px">${(r.tool_calls||[]).length} MCP tool calls, framework ${r.framework}, model ${r.model}</p>
-      ${calls}
-      ${r.note ? `<p class="note">${r.note.replace(/\n/g,"<br>")}</p>` : ""}`;
-  }catch(e){ box.innerHTML = `<p class="note">Review failed: ${e}</p>`; }
+      '<div class="trace">' + (i+1) + '. ' + esc(t.tool) + '\n' +
+      esc((t.args && (t.args.query || JSON.stringify(t.args))) || "") + '</div>').join("");
+    box.innerHTML =
+      '<p class="note">' + (r.tool_calls||[]).length + ' MCP tool calls, framework ' +
+      esc(r.framework||"") + ', model ' + esc(r.model||"") + '</p>' + calls +
+      (r.note ? '<p class="note">' + esc(r.note) + '</p>' : "");
+  }catch(e){ box.innerHTML = '<p class="note">Review failed: ' + esc(String(e)) + '</p>'; }
   btn.disabled = false;
 }
 document.getElementById("review").onclick = runReview;
 
-/* ── transport controls ── */
+/* ---------- transports ---------- */
 let playing = null;
-function stopAll(){ aBefore.pause(); aAfter.pause(); playing = null;
-  document.getElementById("play-before").textContent = "play the illegal master";
-  document.getElementById("play-after").textContent = "play the repaired master";
+function stopAll(){
+  aBefore.pause(); aAfter.pause(); playing = null;
+  document.getElementById("playBefore").classList.remove("playing");
+  document.getElementById("playAfter").classList.remove("playing");
 }
-aBefore.onended = ()=> stopAll();
-aAfter.onended = ()=> stopAll();
-
-document.getElementById("play-before").onclick = ()=>{
+aBefore.onended = stopAll;
+aAfter.onended = stopAll;
+document.getElementById("playBefore").onclick = ()=>{
   if(playing === "before"){ stopAll(); return; }
   stopAll(); aBefore.play(); playing = "before";
-  document.getElementById("play-before").textContent = "stop";
+  document.getElementById("playBefore").classList.add("playing");
 };
-document.getElementById("play-after").onclick = ()=>{
+document.getElementById("playAfter").onclick = ()=>{
   if(playing === "after"){ stopAll(); return; }
   stopAll(); aAfter.play(); playing = "after";
-  document.getElementById("play-after").textContent = "stop";
+  document.getElementById("playAfter").classList.add("playing");
 };
 
-/* ── poll ── */
+/* ---------- run + poll ---------- */
 async function poll(){
-  const run = await fetch("/api/run/"+job).then(r=>r.json());
+  const run = await fetch("/api/run/" + job).then(r=>r.json());
   renderPipeline(run.steps||[]);
-  if(run.state==="done"){
+  if(run.state === "done"){
     renderVerdict(run);
-    aBefore.src = "/api/audio/"+job+"/before";
-    aAfter.src  = "/api/audio/"+job+"/after";
-    document.getElementById("play-before").disabled = false;
-    document.getElementById("play-after").disabled = false;
+    aBefore.src = "/api/audio/" + job + "/before";
+    aAfter.src  = "/api/audio/" + job + "/after";
+    document.getElementById("playBefore").disabled = false;
+    document.getElementById("playAfter").disabled = false;
     document.getElementById("go").disabled = false;
-    loadCatalog();
-    if(selected) loadProfile(selected.identifier);
+    if(selected){ loadProfile(selected.identifier); }
+    burnLufs();
     return;
   }
-  if(run.state==="failed"){
-    document.getElementById("pipeline-log").innerHTML =
-      `<div class="step-warn">failed: ${run.error}</div>`;
+  if(run.state === "failed"){
+    const log = document.getElementById("pipeline");
+    log.classList.add("run");
+    log.innerHTML += '<div class="st flag"><b>failed</b> <span class="sum">' + esc(run.error||"") + '</span></div>';
     document.getElementById("go").disabled = false;
     return;
   }
   setTimeout(poll, 2000);
 }
 
-/* ── primary action ── */
 document.getElementById("go").onclick = async ()=>{
   if(!selected) return;
   stopAll();
   document.getElementById("go").disabled = true;
-  document.getElementById("play-before").disabled = true;
-  document.getElementById("play-after").disabled = true;
-  document.getElementById("checksheet-section").hidden = true;
-  resetLufs();
-  document.getElementById("lufs-empty").hidden = true;
+  document.getElementById("playBefore").disabled = true;
+  document.getElementById("playAfter").disabled = true;
+  document.getElementById("checkBlock").hidden = true;
+  resetReadout();
   renderPipeline([]);
-  job = (await fetch("/api/run/"+selected.identifier, {method:"POST"}).then(r=>r.json())).job;
+  job = (await fetch("/api/run/" + selected.identifier, {method:"POST"}).then(r=>r.json())).job;
   poll();
 };
 
-/* ── init ── */
-initMeter();
+/* ---------- init ---------- */
+buildMeter();
+window.addEventListener("resize", ()=>{ positionRule(); });
 loadTitles();
-loadCatalog();
 </script>
 </body>
 </html>

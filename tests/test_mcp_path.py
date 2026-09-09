@@ -77,8 +77,14 @@ def test_mcp_path_is_used() -> None:
 
     # Rule 4: results parse to non-empty rows
     for call in run_query_calls:
-        rows = _parse_rows(call.get("result_preview", ""))
-        assert len(rows) > 0, (
+        # Prefer the recorded row_count: result_preview is truncated for
+        # readability and therefore is not valid JSON, so re-parsing it reports
+        # zero rows for a call that actually returned data.
+        if "row_count" in call:
+            count = call["row_count"]
+        else:
+            count = len(_parse_rows(call.get("result_preview", "")))
+        assert count > 0, (
             f"FAIL: run_query returned 0 rows.\n"
             f"  Query: {call['args'].get('query','')[:120]}"
         )
