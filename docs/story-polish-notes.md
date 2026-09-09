@@ -1,21 +1,43 @@
-# Checkprint
+# Checkprint story polish notes
 
-The Devpost submission, field by field. Every figure below carries the command that
-produced it.
+Scored 2026-09-10 against `docs/BRIEF.md` + `docs/judge-attack.md` shape:
+incident → named user → named incumbent → one measured number → one honest limit.
+No em dashes.
 
----
+## Scores (1-10)
 
-## 1. Project name
+| Axis | Score | Note |
+|---|---|---|
+| Uniqueness | 8 | Empty lane (measured delivery QC with repair+re-prove). Differentiated from Redslip (catalog triage) in the opening. |
+| Judge-clarity | 8 | Shape block now lands in under 10 seconds: Maya, Vantage/Pulsar/Baton, -16.8→-23.0 in 63s, subtitle lines not rewritten. |
+| Partner-load-bearing proof | 8 | mcp-clickhouse via ADK McpToolset, catalog `"via": "mcp-clickhouse"`, GeminiRequired, ADK Workflow. Still fragile if a judge only skims README. |
+| Demo-hook | 9 | One public ffmpeg command reproduces -16.8 LUFS; curl of live `/api/title/...` shows -23.0. |
 
-**Checkprint**
+**Composite ~8.25.**
 
-## 2. Elevator pitch
+## Top 5 concrete edits (weak lines quoted)
 
-> Measures a delivery master against EBU R128, repairs it in ffmpeg, then measures the repair. One film went -16.8 to -23.0 LUFS in 63 seconds, and one command re-measures the first number.
+1. **OPENING FLUFF (applied):** Was: "Read that diagram top to bottom, because the vertical axis is time... Its third card is explicit about which of its figures are sourced..." Now: shaped incident/user/incumbent/number/limit plus explicit Catalog-rank vs repair split.
+2. **NO NAMED INCUMBENT EARLY (applied):** Was: "Measuring a master is a solved problem and there are several good tools for it." Now names Vantage, Pulsar, Baton and catalog ledgers, and ties the claim to Maya.
+3. **NO DIFFERENTIATION FROM REDSLIP (applied):** Added: "Catalog-rank tools (the sibling question on this track) answer which titles would fail today. Checkprint answers a different question on one file..."
+4. **KEEP (no edit):** Honest boundary section "Where it stops and hands to a person" already strong; do not soften.
+5. **DEFER:** Still no real named human who used it in production. Persona Maya is better than none; a quoted tester would move Impact.
 
-**187 characters**, against Devpost's 200 limit.
+## Edits applied this pass
 
----
+2 surgical blocks in `projects/deliverable/STORY.md` (shape opening + measure paragraph).
+
+## Residual risks
+
+- Same ClickHouse track as Redslip: judges may still confuse the two if they only read titles.
+- Public-domain demo masters remain a credibility tax; modern-master test helps but is synthesised.
+
+## Devpost paste
+
+Paste the block below into the Project Story field (trim images if the form chokes).
+
+```markdown
+**Elevator pitch:** Measures a delivery master against EBU R128, repairs it in ffmpeg, then measures the repair. One film went -16.8 to -23.0 LUFS in 63 seconds, and one command re-measures the first number.
 
 ## 3. About the project
 
@@ -429,17 +451,4 @@ Model Context Protocol, FastAPI, ffmpeg, ebur128, EBU R128, ATSC A/85, Netflix T
 Style Guide, pytest, HTML, CSS, JavaScript
 
 ---
-
-## Links
-
-**Live app:** <https://deliverable-387894104564.us-central1.run.app>
-
-`/api/health` returns the connected ClickHouse version. `/api/catalog` returns the 32
-measured titles and reports `"via": "mcp-clickhouse"`. `/api/title/{id}` hands back the
-exact ffmpeg command for whichever title is on screen, built from the media URL and the
-window that measurement was taken over.
-
-**Repo:** <https://github.com/kamalbuilds/checkprint>
-
-MIT licence. The pushed source is the service you can click: the ADK workflow, the three
-model nodes, the MCP read guardrail and the tests.
+```
