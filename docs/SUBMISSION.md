@@ -50,7 +50,7 @@ Nobody has used this in production. The corpus is public domain films from archi
 
 **ClickHouse is reached through the official `mcp-clickhouse` server.** The binary at `/usr/local/bin/mcp-clickhouse` exposes `list_databases`, `list_tables` and `run_query`, and the agents call it over stdio like any other MCP client. `/api/catalog` on the live deployment returns `"via": "mcp-clickhouse"` alongside its 32 titles, so the integration is inspectable from outside the process. A production run on the live URL, job `0f511b19`, recorded 3 MCP tool calls from `window_scout` and 8 from `regression_auditor`. `repair_planner` made zero, which is by design: it holds no tools so it can't query, which means it can't invent a passage that isn't in the table. It only decides.
 
-Every MCP call passes an ADK `before_tool_callback` that refuses anything which isn't a `SELECT` or `WITH` over one of five named tables. A language model never holds a write connection to the QC record.
+Every MCP call passes an ADK `before_tool_callback` before it reaches the server. A statement gets through only if it reads: a `SELECT`, or a `WITH` whose CTE bodies stay inside the five table allowlist, in which case the statement's own CTE aliases are accepted as readable names too. `DROP`, `TRUNCATE` and an `ALTER TABLE ... DELETE` smuggled in behind a SQL comment are all refused. A language model never holds a write connection to the QC record.
 
 **ClickHouse is doing work that a row store would not enjoy.** `ebur128` emits ten readings a second, so one 90 minute feature is roughly 54,000 rows and a 500 title catalog is around 27 million. One title in the demo corpus carries 2,402 samples over a 60 second scan. A percentile query over that series came back in 15 ms having read 8,411 rows, and we read that back out of `system.query_log` rather than timing it with a stopwatch. The scout's queries aren't primary key lookups either: the SQL Gemini wrote for *Vicki* is a gap and island grouping with `ROW_NUMBER() OVER` that finds contiguous runs of offending 100 ms samples and discards the short ones. It's recorded verbatim in the `fail_windows` table and served back through the API, so "the model chose this query" is something a judge can read rather than something we assert.
 
@@ -64,7 +64,9 @@ Serving is Cloud Run. Gemini runs on Vertex AI, ClickHouse holds the telemetry, 
 
 **A scout with no tools doesn't stop having opinions.** The first time the graph ran end to end, the MCP subprocess had already died at startup. The scout returned five passages with entirely plausible timecodes, one of them 1782 seconds into a 60 second scan. Nothing errored. The output looked like work. Now the run refuses to start unless the server answers a real `list_tools`, and there's a test that goes red when that check is removed.
 
-**A check that can't fail.** While making sure each guardrail was genuinely exercised, we found the write-keyword fence was answering first for every case in the write test, so disabling the `SELECT` only rule left the whole suite green. It looked like two checks; it was one check and a decoration. That rule now has cases only it can catch.
+**A check that can't fail.** While making sure each guardrail was genuinely exercised, we found the write-keyword fence was answering first for every case in the write test, so disabling the `SELECT` only rule left the whole suite green. It looked like two checks; it was one check and a decoration. That rule now has cases only it can catch. The same exercise turned up the opposite bug: a legitimate `WITH x AS (SELECT ... FROM deliverable.loudness_samples) SELECT * FROM x` was being refused because `x` is not a table in the allowlist, so the fence now resolves a statement's own CTE aliases while still rejecting any CTE body that reads outside the five tables.
+
+**A URL that returned 200 and still could not be decoded.** The published reproduce command originally pointed at an archive.org item directory rather than the media file inside it. It answered 200, so nothing looked broken, and it served an HTML index that ffmpeg sensibly refused to demux. Every command we publish now names the file itself and carries the window it was measured over.
 
 **Single pass `loudnorm` made a file worse.** It runs in dynamic mode and measurably moved a -24.3 LUFS file to -25.3, further from spec than where it started. The `verify` step caught it, which is the entire argument for having a `verify` step. Two pass now, with a regression test that fails when the fix is disabled.
 
@@ -92,7 +94,7 @@ Giving a model fewer tools made it more trustworthy, not less. `repair_planner` 
 
 Splitting the decision from the arithmetic is where the agent earns its place. The model picks *where* to look and *what* to repair; Python computes the dB and ffmpeg produces every figure. That split is exactly why every claim on the page is reproducible.
 
-And the boring one: a passing test proves nothing until you've broken what it guards and watched it go red.
+An HTTP 200 is not a working input, and a green test is not a working check. Each of those cost us a debugging session before it became a rule.
 
 ## What's next
 
@@ -110,9 +112,11 @@ Python, Google Agent Development Kit (ADK 2.8.0), google.adk.workflow.Workflow, 
 
 **Live app:** https://deliverable-387894104564.us-central1.run.app
 
-`/api/health` returns the connected ClickHouse version. `/api/catalog` returns the 32 measured titles and says `"via": "mcp-clickhouse"` so you can see which path the data took.
+`/api/health` returns the connected ClickHouse version. `/api/catalog` returns the 32 measured titles and says `"via": "mcp-clickhouse"` so you can see which path the data took. `/api/title/{id}` hands back the exact ffmpeg command for whichever title is on screen, built from the media URL and the window that particular measurement was taken over.
 
-**Repo:** https://github.com/kamalbuilds/deliverable (public, MIT licence)
+**Repo:** https://github.com/kamalbuilds/checkprint
+
+Public, MIT licence, detected by GitHub so it shows in the About sidebar. The pushed source is the service you can click: the ADK workflow, the three model nodes, the MCP read guardrail and the tests.
 
 **Demo video:** https://youtube.com/@kamal `TODO REPLACE` <- placeholder, do not submit this URL
 
@@ -126,4 +130,12 @@ ffmpeg -hide_banner -nostats -t 300 \
 
 Look for `I: -26.1 LUFS` in the summary. EBU R128 wants -23.0 ±1, so that master fails by 3.1 LU.
 
-Two flags matter. Keep `-t 300`, because every figure we publish is a measurement of a bounded window and without it ffmpeg reads the whole feature and returns something else. Don't add `-loglevel error`, because it suppresses the `ebur128` summary and you get empty output.
+Want a second file rather than a second opinion? *Werewolf in a Girls' Dormitory* sits on the other side of target:
+
+```bash
+ffmpeg -hide_banner -nostats -t 120 \
+  -i "https://archive.org/download/werewolf_in_a_girls_dormitory_ipod/Werewolf_In_A_Girls_Dormitory.ogv" \
+  -af ebur128 -f null -
+```
+
+Three details matter. Point at the media file, not the archive.org item directory, which answers 200 with an HTML listing that ffmpeg cannot decode. Keep the `-t` flag, because every figure we publish is a measurement of a bounded window and without it ffmpeg reads the whole feature and returns something else. Don't add `-loglevel error`, because it suppresses the `ebur128` summary and you get empty output.
