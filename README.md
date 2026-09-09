@@ -3,7 +3,7 @@
 **Measures the full delivery spec. Repairs loudness to target. Proves the delta by
 re-measuring.**
 
-Agentic Cinema hackathon · ClickHouse track · Gemini on Google Cloud
+Agentic Cinema hackathon · ClickHouse track · Gemini on Google Cloud. Partner wiring: `ARCHITECTURE.md`.
 
 ---
 
