@@ -141,6 +141,7 @@ tr:last-child td{border-bottom:0}
 .cue-list{font-family:var(--mono);font-size:11px;line-height:1.7;margin:2px 0 4px}
 .cue-row{display:flex;gap:10px;color:var(--text-secondary)}
 .cue-id{color:var(--text-dim);min-width:52px}
+.cue-time{color:var(--text-dim);min-width:196px}
 .cue-metric{min-width:64px}
 .cue-status{min-width:70px}
 .cue-text{color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -442,6 +443,7 @@ function cueRows(b, a){
     : "";
   const items = shown.map(o => `<div class="cue-row">
       <span class="cue-id">cue ${o.cue}</span>
+      <span class="cue-time">${esc(o.timecode || "")}</span>
       <span class="cue-metric v-fail">${esc(metric(o))}</span>
       <span class="cue-status ${stillOver.has(o.cue)?'v-fail':'v-pass'}">${stillOver.has(o.cue)?"still over":"cleared"}</span>
       <span class="cue-text">${esc(o.text || "")}</span>

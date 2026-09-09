@@ -7,6 +7,7 @@ input - and the mutation test at the bottom proves the suite itself has teeth.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -227,9 +228,20 @@ def test_reading_speed_finding_names_the_failing_cues_and_shrinks_after_repair()
     assert [o["cue"] for o in before.offenders] == [1, 3]
     assert before.offenders[0]["cps"] > m.NETFLIX_MAX_CPS
     assert before.offenders[0]["text"]
+    # A judge needs the moment, not just the ordinal. Timecode is SRT-shaped and
+    # matches the cue the offender names.
+    first = before.offenders[0]
+    assert first["timecode"] == "00:00:01,000 --> 00:00:02,000"
+    assert first["start"] == 1.0 and first["end"] == 2.0
+    assert all(
+        re.fullmatch(r"\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}",
+                     o["timecode"])
+        for o in before.offenders
+    )
 
     fixed, _ = m.remediate_subtitles(srt)
     after = m.subtitle_findings(m.measure_subtitles(fixed))[0]
     # Cue 3 has room to extend and is cleared; cue 1 is boxed in and stays over.
     assert len(after.offenders) < len(before.offenders)
     assert [o["cue"] for o in after.offenders] == [1]
+    assert after.offenders[0]["timecode"].startswith("00:00:01,000 -->")

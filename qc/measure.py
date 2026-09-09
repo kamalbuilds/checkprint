@@ -318,18 +318,27 @@ def measure_subtitles(text: str) -> dict:
 
     for idx, c in enumerate(cues, start=1):
         chars = len(c["text"].strip())
+        # Where the defect sits on the timeline, so a reviewer can scrub to it
+        # instead of counting cues. Same parse, rendered back as SRT timecode.
+        when = {
+            "start": round(c["start"], 3),
+            "end": round(c["end"], 3),
+            "timecode": f"{_fmt_ts(c['start'])} --> {_fmt_ts(c['end'])}",
+        }
         if c["duration"] > 0:
             cps = chars / c["duration"]
             # A near-zero duration produces an absurd cps; that is itself the defect,
             # reported as a minimum-duration failure rather than a reading-speed one.
             if cps > NETFLIX_MAX_CPS and c["duration"] >= NETFLIX_MIN_CUE_SECONDS:
-                over_cps.append({"cue": idx, "cps": round(cps, 1), "text": c["text"][:80]})
+                over_cps.append({"cue": idx, "cps": round(cps, 1),
+                                 "text": c["text"][:80], **when})
         if c["duration"] < NETFLIX_MIN_CUE_SECONDS:
-            short.append({"cue": idx, "duration": round(c["duration"], 3)})
+            short.append({"cue": idx, "duration": round(c["duration"], 3), **when})
         if any(len(ln) > NETFLIX_MAX_LINE_CHARS for ln in c["lines"]):
-            long_lines.append({"cue": idx, "longest": max(len(ln) for ln in c["lines"])})
+            long_lines.append({"cue": idx,
+                               "longest": max(len(ln) for ln in c["lines"]), **when})
         if len(c["lines"]) > NETFLIX_MAX_LINES:
-            too_many_lines.append({"cue": idx, "lines": len(c["lines"])})
+            too_many_lines.append({"cue": idx, "lines": len(c["lines"]), **when})
 
     return {
         "cue_count": len(cues),
